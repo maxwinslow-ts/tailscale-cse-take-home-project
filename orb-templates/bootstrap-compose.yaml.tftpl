@@ -1,0 +1,54 @@
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.94.2
+    pull_policy: never
+    hostname: ${region_name}-router
+    container_name: ${region_name}-tailscale-router
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - /var/lib/tailscale:/var/lib/tailscale
+    environment:
+      - TS_AUTHKEY=${ts_key}
+      - TS_HOSTNAME=${region_name}-router
+      - TS_USERSPACE=false
+      - TS_EXTRA_ARGS=--advertise-tags=tag:router --advertise-routes=${cidr} --accept-routes=true --snat-subnet-routes=false --ssh
+    networks:
+      internal-net:
+        ipv4_address: ${router_ip}
+    restart: always
+
+  app:
+    image: node:18-alpine
+    pull_policy: never
+    container_name: ${region_name}-app
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      - tailscale
+    ports:
+      - "80:3000"
+    networks:
+      internal-net:
+        ipv4_address: ${app_ip}
+    volumes:
+      - /opt/stack/server.js:/app/server.js:ro
+    command:
+      - sh
+      - -c
+      - |
+        while ! nslookup dl-cdn.alpinelinux.org >/dev/null 2>&1; do echo "Waiting for network..."; sleep 2; done && \
+        apk add --no-cache tcpdump curl iproute2 && \
+        ip route add ${peer_subnet} via ${router_ip} && \
+        ip route add 100.64.0.0/10 via ${router_ip} && \
+        node /app/server.js
+    restart: always
+
+networks:
+  internal-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${cidr}

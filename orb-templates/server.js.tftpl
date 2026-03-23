@@ -1,0 +1,232 @@
+const http = require("http");
+
+const REGION = "${region_name}";
+const PEER_REGION = "${peer_region}";
+const FLAG = REGION === "us" ? "\u{1F1FA}\u{1F1F8}" : "\u{1F1EA}\u{1F1FA}";
+const PEER_FLAG = PEER_REGION === "us" ? "\u{1F1FA}\u{1F1F8}" : "\u{1F1EA}\u{1F1FA}";
+const LOCAL_SUBNET = "${cidr}";
+const LOCAL_APP_IP = "${app_ip}";
+const PEER_SUBNET = "${peer_subnet}";
+const PEER_APP_IP = "${peer_app_ip}";
+const PEER_URL = "http://" + PEER_APP_IP + ":3000/health";
+
+const escapeHtml = (v) =>
+  String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// Server-side fetch of peer /health
+function checkPeer() {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const req = http.get(PEER_URL, { timeout: 3000 }, (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => {
+        const ms = Date.now() - start;
+        try {
+          const data = JSON.parse(body);
+          resolve({ ok: true, ms, data });
+        } catch {
+          resolve({ ok: false, ms, error: "Invalid JSON" });
+        }
+      });
+    });
+    req.on("error", (e) => resolve({ ok: false, ms: Date.now() - start, error: e.message }));
+    req.on("timeout", () => { req.destroy(); resolve({ ok: false, ms: Date.now() - start, error: "Timeout" }); });
+  });
+}
+
+// --- Route: GET /health ---
+function handleHealth(req, res) {
+  const origin = req.socket.remoteAddress.replace("::ffff:", "");
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({
+    status: "ok",
+    region: REGION,
+    flag: FLAG,
+    ip: LOCAL_APP_IP,
+    subnet: LOCAL_SUBNET,
+    timestamp: new Date().toISOString(),
+    requestFrom: origin,
+  }));
+}
+
+// --- Route: GET /api/peer-status ---
+async function handlePeerStatus(req, res) {
+  const result = await checkPeer();
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(result));
+}
+
+// --- Route: GET / ---
+function handleDashboard(req, res) {
+  const origin = req.socket.remoteAddress.replace("::ffff:", "");
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(renderDashboard(origin));
+}
+
+function renderDashboard(clientIp) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$${FLAG} $${REGION.toUpperCase()} App</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: #0f172a; color: #e2e8f0; padding: 2rem; }
+  .container { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
+  .subtitle { color: #94a3b8; margin-bottom: 1.5rem; }
+  .card { background: #1e293b; border-radius: 12px; padding: 1.25rem 1.5rem;
+          margin-bottom: 1rem; border: 1px solid #334155; }
+  .card h2 { font-size: 1rem; color: #94a3b8; text-transform: uppercase;
+             letter-spacing: 0.05em; margin-bottom: 0.75rem; }
+  .row { display: flex; justify-content: space-between; padding: 0.4rem 0;
+         border-bottom: 1px solid #334155; align-items: center; }
+  .row:last-child { border-bottom: none; }
+  .label { color: #94a3b8; }
+  .value { font-family: "SF Mono", "Fira Code", monospace; color: #f1f5f9; }
+  .badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 9999px;
+           font-size: 0.8rem; font-weight: 600; }
+  .badge.up { background: #064e3b; color: #6ee7b7; }
+  .badge.down { background: #7f1d1d; color: #fca5a5; }
+  .badge.checking { background: #1e3a5f; color: #93c5fd; }
+  .log { background: #0f172a; border-radius: 8px; padding: 1rem;
+         font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem;
+         color: #94a3b8; max-height: 300px; overflow-y: auto; }
+  .log-entry { padding: 0.25rem 0; border-bottom: 1px solid #1e293b; }
+  .log-entry.ok { color: #6ee7b7; }
+  .log-entry.fail { color: #fca5a5; }
+  .ping-btn { background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem;
+              border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+  .ping-btn:hover { background: #2563eb; }
+  .ping-btn:disabled { background: #475569; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>$${FLAG} $${REGION.toUpperCase()} Region App</h1>
+  <p class="subtitle">Serving from <strong>$${LOCAL_SUBNET}</strong></p>
+
+  <div class="card">
+    <h2>\u{1F4E1} This Server</h2>
+    <div class="row"><span class="label">Region</span>
+      <span class="value">$${FLAG} $${REGION.toUpperCase()}</span></div>
+    <div class="row"><span class="label">Subnet</span>
+      <span class="value">$${LOCAL_SUBNET}</span></div>
+    <div class="row"><span class="label">Health Endpoint</span>
+      <span class="value">/health</span></div>
+    <div class="row"><span class="label">Your IP</span>
+      <span class="value">$${escapeHtml(clientIp)}</span></div>
+  </div>
+
+  <div class="card">
+    <h2>$${PEER_FLAG} Peer: $${PEER_REGION.toUpperCase()} Region</h2>
+    <div class="row"><span class="label">Peer IP</span>
+      <span class="value">$${PEER_APP_IP}:3000</span></div>
+    <div class="row"><span class="label">Peer Subnet</span>
+      <span class="value">$${PEER_SUBNET}</span></div>
+    <div class="row"><span class="label">Status</span>
+      <span class="value"><span id="peer-status" class="badge checking">\u{1F504} Checking...</span></span></div>
+    <div class="row"><span class="label">Latency</span>
+      <span class="value" id="peer-latency">--</span></div>
+    <div class="row"><span class="label">Last Checked</span>
+      <span class="value" id="peer-time">--</span></div>
+    <div class="row"><span class="label">Action</span>
+      <span class="value">
+        <button class="ping-btn" id="ping-btn" onclick="pingPeer()">🏓 Ping Now</button>
+        <button class="ping-btn" id="pause-btn" onclick="toggleAuto()" style="margin-left:0.5rem;">⏸️ Pause</button>
+      </span></div>
+  </div>
+
+  <div class="card">
+    <h2 style="display:flex;justify-content:space-between;align-items:center;">\u{1F4CB} Ping Log <button class="ping-btn" onclick="clearLog()" style="font-size:0.7rem;padding:0.3rem 0.7rem;">\u{1F5D1}\u{FE0F} Clear</button></h2>
+    <div class="log" id="ping-log"><div style="color:#64748b;">Waiting for first check...</div></div>
+  </div>
+</div>
+
+<script>
+  const logEl = document.getElementById("ping-log");
+  const statusEl = document.getElementById("peer-status");
+  const latencyEl = document.getElementById("peer-latency");
+  const timeEl = document.getElementById("peer-time");
+  const btn = document.getElementById("ping-btn");
+  const pauseBtn = document.getElementById("pause-btn");
+  let first = true;
+  let autoInterval = null;
+  let paused = false;
+
+  async function pingPeer() {
+    btn.disabled = true;
+    statusEl.className = "badge checking";
+    statusEl.textContent = "\u{1F504} Checking...";
+    try {
+      const res = await fetch("/api/peer-status");
+      const d = await res.json();
+      const now = new Date().toLocaleTimeString();
+      timeEl.textContent = now;
+      if (d.ok) {
+        statusEl.className = "badge up";
+        statusEl.textContent = "\u{2705} Up";
+        latencyEl.textContent = d.ms + "ms";
+        addLog(true, now + " \u{2705} " + d.data.flag + " " + d.data.region.toUpperCase() +
+          " (" + d.data.ip + ") responded in " + d.ms + "ms");
+      } else {
+        statusEl.className = "badge down";
+        statusEl.textContent = "\u{274C} Down";
+        latencyEl.textContent = d.ms + "ms (failed)";
+        addLog(false, now + " \u{274C} " + d.error + " after " + d.ms + "ms");
+      }
+    } catch (e) {
+      statusEl.className = "badge down";
+      statusEl.textContent = "\u{274C} Error";
+      addLog(false, new Date().toLocaleTimeString() + " \u{274C} Fetch error: " + e.message);
+    }
+    btn.disabled = false;
+  }
+
+  function addLog(ok, msg) {
+    if (first) { logEl.innerHTML = ""; first = false; }
+    const el = document.createElement("div");
+    el.className = "log-entry " + (ok ? "ok" : "fail");
+    el.textContent = msg;
+    logEl.prepend(el);
+    if (logEl.children.length > 50) logEl.lastChild.remove();
+  }
+
+  function clearLog() {
+    logEl.innerHTML = '<div style="color:#64748b;">Log cleared.</div>';
+    first = true;
+  }
+
+  function toggleAuto() {
+    paused = !paused;
+    if (paused) {
+      clearInterval(autoInterval);
+      autoInterval = null;
+      pauseBtn.textContent = "\u{25B6}\u{FE0F} Resume";
+    } else {
+      pingPeer();
+      autoInterval = setInterval(pingPeer, 5000);
+      pauseBtn.textContent = "\u{23F8}\u{FE0F} Pause";
+    }
+  }
+
+  // Auto-check every 5s
+  pingPeer();
+  autoInterval = setInterval(pingPeer, 5000);
+</script>
+</body>
+</html>`;
+}
+
+// --- Router ---
+http.createServer(async (req, res) => {
+  const url = req.url.split("?")[0];
+  console.log(new Date().toISOString(), req.method, url, "from", req.socket.remoteAddress);
+
+  if (url === "/health") return handleHealth(req, res);
+  if (url === "/api/peer-status") return handlePeerStatus(req, res);
+  return handleDashboard(req, res);
+}).listen(3000, () => console.log(FLAG, REGION, "app listening on :3000"));
