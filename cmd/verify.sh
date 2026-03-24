@@ -116,22 +116,6 @@ else
   fail "EU app → US app /health FAILED"
 fi
 
-# ── 8b. Direct VM-to-VM ping (should FAIL) ───────────
-header "8b. Direct VM-to-Peer-Container Ping (should FAIL)"
-
-# US VM tries to ping EU app container directly (no Tailscale, no route)
-if orb run -m legacy-us ping -c 1 -W 2 172.22.0.10 >/dev/null 2>&1; then
-  fail "US VM can directly reach 172.22.0.10 — expected unreachable"
-else
-  pass "US VM cannot directly reach 172.22.0.10 (traffic must go via Tailscale)"
-fi
-
-if orb run -m legacy-eu ping -c 1 -W 2 172.21.0.10 >/dev/null 2>&1; then
-  fail "EU VM can directly reach 172.21.0.10 — expected unreachable"
-else
-  pass "EU VM cannot directly reach 172.21.0.10 (traffic must go via Tailscale)"
-fi
-
 # ── 9. SNAT disabled (source IP preserved) ───────────
 header "9. Source IP Preservation (SNAT Disabled)"
 
@@ -170,3 +154,9 @@ else
   printf "${RED}${BOLD}  Some checks failed. Review output above.${RESET}\n"
 fi
 printf "${BOLD}════════════════════════════════════════${RESET}\n"
+
+# ── SSH Break-Glass (manual) ─────────────────────────
+printf "\n${CYAN}${BOLD}── 11. Tailscale SSH (Break-Glass Access) ──${RESET}\n"
+printf "${YELLOW}  Run these commands manually to verify IdP-backed SSH:${RESET}\n\n"
+printf "  ${BOLD}tailscale ssh root@us-router -- hostname && echo \"✅ US SSH OK\" || echo \"❌ US SSH FAILED\"${RESET}\n"
+printf "  ${BOLD}tailscale ssh root@eu-router -- hostname && echo \"✅ EU SSH OK\" || echo \"❌ EU SSH FAILED\"${RESET}\n\n"

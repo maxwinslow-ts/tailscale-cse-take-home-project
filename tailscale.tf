@@ -37,6 +37,15 @@ resource "tailscale_acl" "main_acl" {
         "172.22.0.0/24" = ["tag:router"],
       },
     },
+
+    ssh = [
+      {
+        action = "check",
+        src    = ["group:admin"],
+        dst    = ["tag:router"],
+        users  = ["root"],
+      },
+    ],
   })
 }
 
