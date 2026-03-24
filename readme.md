@@ -135,8 +135,8 @@ Stops all containers and destroys the VMs:
 ```
 
 ## Todos - Areas To Extend
-- [ ] MYSQL on both networks communicating via [sidecar container](https://tailscale.com/blog/docker-tailscale-guide)
-- [ ] Systemd Tailscale service on Host
+- [ ] MYSQL on both networks communicating via separate [sidecar container](https://tailscale.com/blog/docker-tailscale-guide)
+- [ ] Systemd Tailscale service on Host for SSH
 - [ ] Connect with AWS VPC
 - [ ] Connect to isolated Kubernetes services from VM containers ([via Operator](https://tailscale.com/docs/features/kubernetes-operator))
 
