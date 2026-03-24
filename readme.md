@@ -58,7 +58,7 @@ We are replacing manual commands and static tunnels with a centralized Tailscale
 
 * **Auditability by Default:** Transparent routing provides a clear record of "who talked to what" for every regional request.
 
-* **Infrastructure Agnostic:** This PoC proves we can connect legacy environments without re-architecting their existing VPC or local network settings.
+* **Infrastructure Agnostic:** This PoC proves we can connect legacy environments without re-architecting their existing VPC or host network settings.
 
 # Lab Setup
 
