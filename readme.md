@@ -19,13 +19,11 @@
 ## 2. The Problem: The "Manual Networking" Tax
 The customer currently manages cross-region links and emergency access using manual `iptables`, `ip route` commands, and static SSH tunnels.
 
-* **Operational Toil:** Managing network rules by hand leads to configuration drift. US and EU routing tables easily get out of sync, causing "ghost" connection issues that are hard to debug.
+* **Operational Toil:** Without a control plane, cross-region connectivity requires manually configured tunnels with hardcoded peer addresses on each VM. When either VM is reprovisioned, both sides must be updated independently. Two machines, no mechanism to verify they're in sync.
 
-* **Fragile Site-to-Site Logic:** Building backup paths manually is complex. Without a mesh overlay, any change to the VM's network requires a manual update to the static tunnels.
+* **Visibility "Blind Spots":** Subnet routers perform SNAT by default, rewriting container source IPs to the router's address. Cross-region traffic becomes unattributable to a specific container, failing SOC2 audit requirements.
 
-* **Visibility "Blind Spots":** Manual NAT often masks source IPs. This makes it impossible to map traffic to specific containers, failing basic SOC2 audit requirements.
-
-* **Slow Emergency Access:** Hand-delivering SSH keys and updating firewall rules during a "break-glass" event is too slow. It increases the risk of human error under pressure.
+* **Slow Emergency Access:** Static SSH keys carry no identity context. Revoking access during an incident means editing authorized_keys on each VM manually, with no audit trail of who used what key.
 
 ---
 
@@ -35,30 +33,30 @@ We are replacing manual commands and static tunnels with a centralized Tailscale
 ### Core Technical Plan
 
 * **Site-to-Site Subnet Routing**
-    * **The Fix:** We deploy a Tailscale container on each VM as a [Subnet Router](https://tailscale.com/docs/features/site-to-site). It bridges the isolated Node.js services across regions.
+    * **The Fix:** A Tailscale [Subnet Router](https://tailscale.com/docs/features/site-to-site) container runs on each VM. It bridges the isolated Docker networks across regions.
 
-    * **Benefit:** This replaces manual `iptables` with a managed mesh. We get cross-VM connectivity without touching the host's underlying networking.
+    * **Benefit:** Replaces per-VM tunnel config with a managed mesh. Containerized services get cross-region connectivity without touching the host's underlying networking.
 
 * **Audit-Ready Transparency (`--snat-subnet-routes=false`)**
-    * **The Fix:** We disable SNAT on the routers to preserve original container IPs.
+    * **The Fix:** SNAT is disabled on each router, so the original container source IP is preserved end-to-end.
 
-    * **Benefit:** This satisfies SOC2. Auditors can see exactly which specific Node.js instance accessed a remote resource, even across regions.
+    * **Benefit:** Auditors can attribute every cross-region request to a specific container instance. This satisfies SOC2 traffic traceability requirements.
 
 * **IdP-Backed SSH (Break-Glass)**
-    * **The Fix:** We enable [Tailscale SSH](https://tailscale.com/docs/features/ssh) on the Tailscale containers, tied directly to the company’s Identity Provider (IdP).
+    * **The Fix:** [Tailscale SSH](https://tailscale.com/docs/features/ssh) is enabled on each VM host, gating access through the company's IdP instead of static keys.
 
-    * **Benefit:** We close public Port 22. Engineers get instant, MFA-protected access to the VM shell based on their identity, not a static, shareable key.
+    * **Benefit:** Port 22 can be closed. Access is MFA-protected, identity-scoped, and fully audited. No key distribution required.
 
 ---
 
 ## 4. Business Value (The "Why")
-* **Zero Manual Sync:** Centralizing policy in the Tailscale admin console stops "configuration drift" between regional VMs.
+* **Zero Manual Sync:** Routing policy and ACLs are defined once in Terraform and propagated to both regions automatically. No per-VM edits, no opportunity for the two sides to drift.
 
-* **Reduced RTO (Recovery Time):** "Break-glass" is no longer a scramble for keys. It’s a secure, audited login tied to the IdP, allowing faster response to regional outages.
+* **Auditability by Default:** Preserved source IPs mean every cross-region request is traceable to a specific container instance, not just a router address. Compliance evidence is built into the data plane.
 
-* **Auditability by Default:** Transparent routing provides a clear record of "who talked to what" for every regional request.
+* **Faster Incident Response**: Break-glass access is a secure, audited login, not a key hunt. Engineers can reach any container in seconds, with a full identity trail.
 
-* **Infrastructure Agnostic:** This PoC proves we can connect legacy environments without re-architecting their existing VPC or host network settings.
+* **Infrastructure Agnostic:** The same overlay works on local VMs, cloud instances, or bare metal. No changes to the underlying network required to connect isolated environments.
 
 # Lab Setup
 
@@ -135,9 +133,12 @@ Stops all containers and destroys the VMs:
 ```
 
 ## Todos - Areas To Extend
-- [ ] MYSQL on both networks communicating via separate [sidecar container](https://tailscale.com/blog/docker-tailscale-guide)
-- [ ] Systemd Tailscale service on Host for SSH
-- [ ] Connect with AWS VPC
-- [ ] Connect to isolated Kubernetes services from VM containers ([via Operator](https://tailscale.com/docs/features/kubernetes-operator))
+- [ ] Add MySQL and a MySQL sidecar container on each VM connected via [Tailscale sidecar container](https://tailscale.com/blog/docker-tailscale-guide), with ACLs restricting access to only the Node.js app containers from both regions
+
+- [ ] Systemd Tailscale service running on Host for IdP-based SSH access
+
+- [ ] Deploy an Nginx reverse proxy on a separate Kubernetes cluster, routing to the US/EU Node.js apps via the tailnet using the [Kubernetes Operator](https://tailscale.com/docs/features/kubernetes-operator) — demonstrating the mesh extends to K8s workloads without reconfiguring existing VMs.
+
+
 
 
