@@ -45,7 +45,7 @@ We are replacing manual commands and static tunnels with a centralized Tailscale
     * **Benefit:** This satisfies SOC2. Auditors can see exactly which specific Node.js instance accessed a remote resource, even across regions.
 
 * **IdP-Backed SSH (Break-Glass)**
-    * **The Fix:** We enable [Tailscale SSH](https://tailscale.com/docs/features/ssh) on the Ubuntu Hosts, tied directly to the company’s Identity Provider (IdP).
+    * **The Fix:** We enable [Tailscale SSH](https://tailscale.com/docs/features/ssh) on the Tailscale containers, tied directly to the company’s Identity Provider (IdP).
 
     * **Benefit:** We close public Port 22. Engineers get instant, MFA-protected access to the VM shell based on their identity, not a static, shareable key.
 
