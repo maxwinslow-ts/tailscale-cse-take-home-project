@@ -3,6 +3,11 @@
 **Project:** Modernizing Legacy Infrastructure with Tailscale  
 **Prepared By:** Max Winslow | **Date:** March 2026
 
+<p align="center">
+  <img src="img/us-screenshot.png" alt="US Dashboard" width="400" />
+  <img src="img/eu-screenshot.png" alt="EU Dashboard" width="400" />
+</p>
+
 ## 1. Project Overview (PoC)
 **Goal:** Demonstrate secure, cross-region connectivity and "break-glass" access between two isolated legacy environments (US and EU) without manual VPN configuration.
 
@@ -57,47 +62,9 @@ We are replacing manual commands and static tunnels with a centralized Tailscale
 
 # Lab Setup
 
-```mermaid
-graph TD
-    subgraph MacHost [MAC HOST - group:admin]
-        A[Terraform / Orb CLI]
-        B[Browser / SSH Client]
-    end
-
-    subgraph Site_US [OrbStack VM: legacy-us]
-        direction TB
-        subgraph Net_US [Docker Bridge: 172.21.0.0/24]
-            R1[us-tailscale-router<br/>172.21.0.2]
-            App1[us-app<br/>172.21.0.10]
-        end
-    end
-
-    subgraph Site_EU [OrbStack VM: legacy-eu]
-        direction TB
-        subgraph Net_EU [Docker Bridge: 172.22.0.0/24]
-            R2[eu-tailscale-router<br/>172.22.0.2]
-            App2[eu-app<br/>172.22.0.10]
-        end
-    end
-
-    %% Connections
-    B -->|Port 80| App1
-    B -->|Port 80| App2
-    B -.->|Tailscale SSH| R1
-    B -.->|Tailscale SSH| R2
-
-    %% The Site-to-Site Tunnel
-    R1 <==>|Tailscale WireGuard Tunnel| R2
-
-    %% Internal Routing
-    App1 <-->|via Static Route| R1
-    App2 <-->|via Static Route| R2
-
-    %% Styling
-    style R1 fill:#f9f,stroke:#333,stroke-width:2px
-    style R2 fill:#f9f,stroke:#333,stroke-width:2px
-    style MacHost fill:#f5f5f5,stroke:#666,stroke-dasharray: 5 5
-```
+<p align="center">
+  <img src="img/mermaid-diagram.png" alt="Architecture Diagram" width="700" />
+</p>
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
