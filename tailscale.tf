@@ -1,38 +1,40 @@
+# Import the existing tailnet ACL so Terraform manages it in-place
+# rather than failing on a conflict with the pre-existing policy.
 import {
   to = tailscale_acl.main_acl
   id = "acl"
 }
 
-# ── ACL Policy (Modern Grants) ───────────────────────────────────────
+# ── ACL Policy ───────────────────────────────────────────────────────
+# Default-deny posture. Only the grants below permit traffic.
 resource "tailscale_acl" "main_acl" {
   acl = jsonencode({
 
-    # Tag ownership
+    # Admin email owns all tags (required before tags can be assigned)
     tagOwners = {
       "tag:database"   = [var.tailscale_admin_email],
       "tag:eu-router"  = [var.tailscale_admin_email],
       "tag:app-server" = [var.tailscale_admin_email],
     },
 
-    # Access control (default-deny: only these grants allow traffic)
     grants = [
       {
-        # US app containers → EU MySQL via eu-router subnet route.
-        # With --snat-subnet-routes=false, source IP is the container's
-        # real IP (172.21.0.x), so src must be the subnet CIDR, not a tag.
+        # US Docker containers → EU MySQL (tcp:3306 only).
+        # Source is the Docker bridge CIDR because SNAT is disabled on
+        # the subnet router, so packets arrive with their real container IP.
         src = ["${local.us_docker_cidr}"],
         dst = ["192.168.0.0/16"],
         ip  = ["tcp:3306"],
       },
       {
-        # Admin full access for debugging & management
+        # Admin: unrestricted access for debugging
         src = ["autogroup:admin"],
         dst = ["*"],
         ip  = ["*"],
       },
     ],
 
-    # Auto-approve subnet routes for designated tags
+    # Auto-approve advertised subnet routes by tag
     autoApprovers = {
       routes = {
         "${local.us_docker_cidr}" = ["tag:app-server"],
@@ -40,7 +42,7 @@ resource "tailscale_acl" "main_acl" {
       },
     },
 
-    # Tailscale SSH: admin can SSH into all tagged nodes (IdP check)
+    # Tailscale SSH with IdP identity check for audit trail
     ssh = [
       {
         action = "check",
@@ -52,14 +54,17 @@ resource "tailscale_acl" "main_acl" {
   })
 }
 
-# ── Auth Keys (one per role) ──────────────────────────────────────────
+# ── Auth Keys ────────────────────────────────────────────────────────
+# One pre-authorized, ephemeral key per role. Each key is tagged so the
+# node inherits ACL permissions at join time. Keys depend on the ACL to
+# ensure tags exist before they are referenced.
+
 resource "tailscale_tailnet_key" "database" {
   reusable      = true
   ephemeral     = true
   preauthorized = true
   tags          = ["tag:database"]
-
-  depends_on = [tailscale_acl.main_acl]
+  depends_on    = [tailscale_acl.main_acl]
 }
 
 resource "tailscale_tailnet_key" "eu_router" {
@@ -67,8 +72,7 @@ resource "tailscale_tailnet_key" "eu_router" {
   ephemeral     = true
   preauthorized = true
   tags          = ["tag:eu-router"]
-
-  depends_on = [tailscale_acl.main_acl]
+  depends_on    = [tailscale_acl.main_acl]
 }
 
 resource "tailscale_tailnet_key" "app_server" {
@@ -76,6 +80,5 @@ resource "tailscale_tailnet_key" "app_server" {
   ephemeral     = true
   preauthorized = true
   tags          = ["tag:app-server"]
-
-  depends_on = [tailscale_acl.main_acl]
+  depends_on    = [tailscale_acl.main_acl]
 }
