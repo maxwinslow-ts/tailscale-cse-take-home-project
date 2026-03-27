@@ -15,3 +15,16 @@ variable "tailscale_tailnet" {
   type        = string
   sensitive   = true
 }
+
+variable "mysql_root_password" {
+  description = "Root password for the MySQL server on eu-db"
+  type        = string
+  sensitive   = true
+  default     = "rootpass"
+}
+
+variable "mysql_database" {
+  description = "Default database name created on eu-db"
+  type        = string
+  default     = "app"
+}
