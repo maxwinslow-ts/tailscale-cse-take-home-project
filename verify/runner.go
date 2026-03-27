@@ -1,3 +1,10 @@
+// runner.go — Command execution helpers. Three execution contexts:
+//
+//	orbRun(vm, cmd)              run a shell command on an OrbStack VM
+//	dockerExec(container, cmd)   run inside a Docker container on the us-app VM
+//	localRun(cmd)                run on the local Mac host
+//
+// Also provides discoverBindAddr() which reads MySQL's bind-address from eu-db.
 package main
 
 import (
@@ -65,4 +72,16 @@ func localRunTimeout(cmd string, timeout time.Duration) runResult {
 // shellQuote wraps a string in single quotes, escaping internal single quotes.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+// discoverBindAddr reads MySQL's bind-address from eu-db's mysqld config.
+func discoverBindAddr() string {
+	res := orbRun("eu-db", `grep "^bind-address" /etc/mysql/mysql.conf.d/mysqld.cnf`)
+	if res.OK() {
+		parts := strings.Fields(res.Output())
+		if len(parts) >= 3 {
+			return parts[len(parts)-1]
+		}
+	}
+	return ""
 }

@@ -1,3 +1,6 @@
+// US Euro Viewer — read-only UI (port 3000, mapped to :80).
+// Queries the EU MySQL database through the Tailscale mesh and
+// renders 3 random famous Europeans on each page load.
 const http = require('http');
 const { execSync } = require('child_process');
 const PORT = 3000;

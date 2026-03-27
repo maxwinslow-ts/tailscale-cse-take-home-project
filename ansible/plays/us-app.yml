@@ -1,8 +1,10 @@
 ---
 # ── US Application Server (us-app) ───────────────────────────────────
 #
-# Docker host running a Tailscale container (mesh endpoint),
-# us-euro-viewer (read-only), and us-euro-viewer-admin (read/write).
+# Docker host running three containers on a shared bridge (172.21.0.0/24):
+#   us-app-ts           — Tailscale sidecar (mesh endpoint + subnet router)
+#   us-euro-viewer      — read-only Node.js app (:80)
+#   us-euro-viewer-admin — read/write admin panel (:8080)
 #
 - name: Configure US Application Server
   hosts: us-app
@@ -14,6 +16,9 @@
         state: present
         update_cache: true
 
+    # Disable Docker's userland-proxy so container traffic flows through
+    # iptables directly. This preserves real source IPs instead of
+    # rewriting them to the Docker host address.
     - name: Configure Docker daemon (disable userland-proxy)
       copy:
         dest: /etc/docker/daemon.json

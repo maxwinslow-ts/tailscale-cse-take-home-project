@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# ═══════════════════════════════════════════════════════════════════════
-# Reads Terraform outputs → writes Ansible inventory.yml
+# ── Reads Terraform outputs → writes ansible/inventory.yml ───────────
 # Run from repo root: bash ansible/generate-inventory.sh
-# ═══════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────
 cd "$(dirname "$0")/.."
 
 EU_DB_IP=$(terraform output -raw eu_db_ip)

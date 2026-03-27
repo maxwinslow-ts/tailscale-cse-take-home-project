@@ -1,3 +1,6 @@
+// transit_encrypt.go — Packet-capture comparison proving Tailscale encrypts
+// database traffic. Captures plaintext MySQL on the insecure Docker bridge
+// (us-app), then captures WireGuard UDP on eu-router's physical interface.
 package main
 
 import (
@@ -121,14 +124,14 @@ func runTransitEncrypt(captureSecs int) error {
 	captureTimeout := time.Duration(captureSecs) * time.Second
 
 	// ── Install tcpdump if needed ────────────────────────────────────
-	header("Setup")
+	header("Setup — installing tcpdump on us-app + eu-router")
 	fmt.Printf("  %sInstalling tcpdump on VMs if needed…%s\n", dim, reset)
 	orbRunTimeout("us-app", "sudo apt-get install -y tcpdump >/dev/null 2>&1", 30*time.Second)
 	orbRunTimeout("eu-router", "sudo apt-get install -y tcpdump >/dev/null 2>&1", 30*time.Second)
 	info("tcpdump ready")
 
 	// ── Discover insecure Docker bridge interface on us-app ──────────
-	header("Interface Discovery")
+	header("Interface Discovery (us-app + eu-router)")
 
 	brRes := orbRun("us-app", `ip -o addr show | grep '172.22.0' | awk '{print $2}' | head -1`)
 	insecureBridge := strings.TrimSpace(brRes.Output())
@@ -149,15 +152,8 @@ func runTransitEncrypt(captureSecs int) error {
 	}
 	info(fmt.Sprintf("eu-router physical interface: %s", physIface))
 
-	// ── Discover eu-db MySQL bind address (needed for context) ───────
-	bindRes := orbRun("eu-db", `grep "^bind-address" /etc/mysql/mysql.conf.d/mysqld.cnf`)
-	bindAddr := ""
-	if bindRes.OK() {
-		parts := strings.Fields(bindRes.Output())
-		if len(parts) >= 3 {
-			bindAddr = parts[len(parts)-1]
-		}
-	}
+	// ── Discover eu-db MySQL bind address (for context output) ───────
+	bindAddr := discoverBindAddr()
 	if bindAddr != "" {
 		info(fmt.Sprintf("eu-db MySQL bind address: %s", bindAddr))
 	}
@@ -299,15 +295,4 @@ func runTransitEncrypt(captureSecs int) error {
 	// ── Summary ──────────────────────────────────────────────────────
 	printSummary(passed, failed)
 	return nil
-}
-
-func printSummary(passed, failed int) {
-	fmt.Printf("\n%s════════════════════════════════════════%s\n", bold, reset)
-	fmt.Printf("%s  Passed: %d%s  %s  Failed: %d%s\n", green, passed, reset, red, failed, reset)
-	if failed == 0 {
-		fmt.Printf("%s%s  All checks passed! ✅%s\n", green, bold, reset)
-	} else {
-		fmt.Printf("%s%s  Some checks failed. Review output above.%s\n", red, bold, reset)
-	}
-	fmt.Printf("%s════════════════════════════════════════%s\n", bold, reset)
 }

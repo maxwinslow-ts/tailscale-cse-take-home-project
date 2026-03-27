@@ -1,8 +1,10 @@
 ---
 # ── EU Database Server (eu-db) ───────────────────────────────────────
 #
-# MySQL server reachable only on the OrbStack bridge IP,
-# Tailscale installed for SSH management only (no routes).
+# MySQL bound to the OrbStack bridge IP only (not 0.0.0.0).
+# Tailscale is installed for SSH-based management — no routes advertised.
+# General query log is enabled so the verify suite can confirm that
+# queries arrive with the real container source IP (source IP preservation).
 #
 - name: Configure EU Database Server
   hosts: eu-db
@@ -43,6 +45,8 @@
         group: adm
         mode: '0750'
 
+    # General query log records every SQL statement with its source IP,
+    # letting the verify suite prove source IP preservation through the mesh.
     - name: Enable MySQL general query log
       copy:
         dest: /etc/mysql/mysql.conf.d/general-log.cnf
@@ -53,6 +57,7 @@
           log_output = FILE
       notify: restart mysql
 
+    # Flush now so MySQL is fully restarted before we attempt to seed.
     - name: Restart MySQL now
       meta: flush_handlers
 

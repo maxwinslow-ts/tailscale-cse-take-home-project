@@ -1,3 +1,6 @@
+// mysql.go — Verifies MySQL access control and connectivity.
+// Probes eu-db:3306 from six vantage points (two should be allowed by ACL,
+// four should be blocked), then runs a ping sweep from each source.
 package main
 
 import (
@@ -31,20 +34,12 @@ func runMySQLChecks(pingCount int) error {
 	p := func(msg string) { passed++; pass(msg) }
 	f := func(msg string) { failed++; fail(msg) }
 
-	// ── Discover MySQL bind address ──────────────────────────────────
-	header("MySQL Configuration")
+	// ── Discover MySQL bind address on eu-db ─────────────────────────
+	header("MySQL Configuration (eu-db)")
 
-	bindRes := orbRun("eu-db", `grep "^bind-address" /etc/mysql/mysql.conf.d/mysqld.cnf`)
-	bindAddr := ""
-	if bindRes.OK() {
-		parts := strings.Fields(bindRes.Output())
-		if len(parts) >= 3 {
-			bindAddr = parts[len(parts)-1]
-		}
-	}
-
+	bindAddr := discoverBindAddr()
 	if bindAddr == "" {
-		f("Could not discover MySQL bind address from eu-db")
+		f("Could not read MySQL bind address from eu-db")
 		fmt.Printf("\n%s%sAborted — cannot continue without bind address.%s\n", red, bold, reset)
 		return nil
 	}
@@ -56,7 +51,7 @@ func runMySQLChecks(pingCount int) error {
 	}
 
 	// ── Listening sockets ────────────────────────────────────────────
-	header("MySQL Listening Sockets")
+	header("MySQL Listening Sockets (eu-db)")
 
 	listenRes := orbRun("eu-db", `sudo ss -tlnp | grep ':3306'`)
 	if listenRes.OK() {
@@ -101,80 +96,69 @@ func runMySQLChecks(pingCount int) error {
 		f("Could not list ports on eu-db")
 	}
 
-	// ── MySQL Access Control Tests ───────────────────────────────────
-	header("MySQL Access Control")
+	// ── MySQL Access Control ─────────────────────────────────────────
+	// Probe eu-db:3306 from six vantage points. The two app containers
+	// should be ALLOWED (routed through the Tailscale mesh via the ACL
+	// grant). Everything else should be BLOCKED.
+	header(fmt.Sprintf("MySQL Access Control — probing eu-db (%s:3306)", bindAddr))
 
 	type accessTest struct {
-		name     string
-		run      func(string) runResult
-		expected bool // true = should succeed, false = should be blocked
+		name     string           // source → destination shown in output
+		run      func() runResult // executes the probe
+		expected bool             // true = ALLOWED, false = BLOCKED
 	}
 
 	const probeTimeout = 5 * time.Second
 
+	// Each probe is tailored to the tools available in its environment.
 	mysqlProbe := fmt.Sprintf(
 		`timeout 5 mysql -h %s -u app -papppass -D app --skip-ssl -e 'SELECT 1' 2>&1`,
 		bindAddr,
 	)
-
-	// For us-app-ts (Alpine), install mariadb-client first then probe
-	mysqlProbeTsInstall := fmt.Sprintf(
+	// Alpine containers (us-app-ts) need mariadb-client installed first
+	mysqlProbeAlpine := fmt.Sprintf(
 		`apk add --no-cache mariadb-client >/dev/null 2>&1; timeout 5 mariadb -h %s -u app -papppass -D app --skip-ssl -e 'SELECT 1' 2>&1`,
 		bindAddr,
 	)
-
-	// For eu-router / us-app host — try mysql then fall back to nc
+	// VMs without mysql client fall back to a raw TCP probe via nc
 	mysqlProbeNC := fmt.Sprintf(
 		`timeout 5 mysql -h %s -u app -papppass -D app --skip-ssl -e 'SELECT 1' 2>&1 || timeout 5 bash -c 'echo QUIT | nc -w 5 %s 3306' 2>&1`,
 		bindAddr, bindAddr,
 	)
-
-	// For Mac host — TCP probe with strict timeout
+	// Mac host — TCP probe only
 	mysqlProbeMac := fmt.Sprintf(
 		`nc -z -w 5 -G 5 %s 3306 2>&1`, bindAddr,
 	)
 
 	tests := []accessTest{
 		{
-			name: "us-euro-viewer (172.21.0.10)",
-			run: func(probe string) runResult {
-				return dockerExecTimeout("us-euro-viewer", probe, probeTimeout)
-			},
+			name:     "us-euro-viewer → eu-db:3306",
+			run:      func() runResult { return dockerExecTimeout("us-euro-viewer", mysqlProbe, probeTimeout) },
 			expected: true,
 		},
 		{
-			name: "us-euro-viewer-admin (172.21.0.20)",
-			run: func(probe string) runResult {
-				return dockerExecTimeout("us-euro-viewer-admin", probe, probeTimeout)
-			},
+			name:     "us-euro-viewer-admin → eu-db:3306",
+			run:      func() runResult { return dockerExecTimeout("us-euro-viewer-admin", mysqlProbe, probeTimeout) },
 			expected: true,
 		},
 		{
-			name: "us-app-ts (172.21.0.2)",
-			run: func(probe string) runResult {
-				return dockerExecTimeout("us-app-ts", mysqlProbeTsInstall, 15*time.Second)
-			},
+			name:     "us-app-ts (sidecar) → eu-db:3306",
+			run:      func() runResult { return dockerExecTimeout("us-app-ts", mysqlProbeAlpine, 15*time.Second) },
 			expected: false,
 		},
 		{
-			name: "eu-router VM",
-			run: func(probe string) runResult {
-				return orbRunTimeout("eu-router", mysqlProbeNC, probeTimeout)
-			},
+			name:     "eu-router VM → eu-db:3306",
+			run:      func() runResult { return orbRunTimeout("eu-router", mysqlProbeNC, probeTimeout) },
 			expected: false,
 		},
 		{
-			name: "us-app VM host",
-			run: func(probe string) runResult {
-				return orbRunTimeout("us-app", mysqlProbeNC, probeTimeout)
-			},
+			name:     "us-app VM host → eu-db:3306",
+			run:      func() runResult { return orbRunTimeout("us-app", mysqlProbeNC, probeTimeout) },
 			expected: false,
 		},
 		{
-			name: "Mac host (local)",
-			run: func(probe string) runResult {
-				return localRunTimeout(mysqlProbeMac, probeTimeout)
-			},
+			name:     "Mac host (local) → eu-db:3306",
+			run:      func() runResult { return localRunTimeout(mysqlProbeMac, probeTimeout) },
 			expected: false,
 		},
 	}
@@ -189,7 +173,7 @@ func runMySQLChecks(pingCount int) error {
 		start := time.Now()
 
 		go func() {
-			r := t.run(mysqlProbe)
+			r := t.run()
 			ch <- result{res: r, succeeded: r.OK() && !isBlocked(r)}
 		}()
 
@@ -232,7 +216,7 @@ func runMySQLChecks(pingCount int) error {
 	}
 
 	// ── Ping Sweep ───────────────────────────────────────────────────
-	header(fmt.Sprintf("Ping Sweep — %d pings to eu-db (%s)", pingCount, bindAddr))
+	header(fmt.Sprintf("Ping Sweep — %d pings from each source → eu-db (%s)", pingCount, bindAddr))
 	fmt.Printf("  %s(informational — not counted in pass/fail tally)%s\n", dim, reset)
 
 	type pingSource struct {
@@ -308,20 +292,12 @@ func runMySQLChecks(pingCount int) error {
 		}
 	}
 
-	// ── Summary ──────────────────────────────────────────────────────
-	fmt.Printf("\n%s════════════════════════════════════════%s\n", bold, reset)
-	fmt.Printf("%s  Passed: %d%s  %s  Failed: %d%s\n", green, passed, reset, red, failed, reset)
-	if failed == 0 {
-		fmt.Printf("%s%s  All checks passed! ✅%s\n", green, bold, reset)
-	} else {
-		fmt.Printf("%s%s  Some checks failed. Review output above.%s\n", red, bold, reset)
-	}
-	fmt.Printf("%s════════════════════════════════════════%s\n", bold, reset)
-
+	printSummary(passed, failed)
 	return nil
 }
 
-// isBlocked returns true if the output suggests the connection was blocked.
+// isBlocked returns true if combined stdout+stderr suggests the connection
+// was refused, timed out, or otherwise blocked.
 func isBlocked(r runResult) bool {
 	combined := strings.ToLower(r.Stdout + " " + r.Stderr)
 	blocked := []string{"error", "denied", "refused", "timed out", "timeout", "blocked", "can't connect", "no route"}
@@ -362,12 +338,4 @@ func stats(vals []float64) (min, max, avg float64) {
 	}
 	avg = sum / float64(len(vals))
 	return
-}
-
-func truncate(s string, n int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) > n {
-		return s[:n] + "…"
-	}
-	return s
 }

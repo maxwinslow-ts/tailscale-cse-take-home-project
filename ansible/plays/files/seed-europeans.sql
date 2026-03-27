@@ -1,15 +1,9 @@
+-- Seed script for the EU database.
+-- Creates the famous_europeans table, populates it, and grants access
+-- to the read-only (app) and read-write (appadmin) MySQL users.
+
 CREATE DATABASE IF NOT EXISTS app;
 USE app;
-
-CREATE TABLE IF NOT EXISTS demo (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  region VARCHAR(32) NOT NULL,
-  message VARCHAR(255) NOT NULL
-);
-
-INSERT INTO demo (region, message)
-SELECT 'eu', 'Hello from the EU database'
-WHERE NOT EXISTS (SELECT 1 FROM demo WHERE region='eu' LIMIT 1);
 
 DROP TABLE IF EXISTS famous_europeans;
 CREATE TABLE famous_europeans (

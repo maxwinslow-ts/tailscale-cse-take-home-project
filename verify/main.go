@@ -1,3 +1,10 @@
+// verify — CLI tool that validates the Sovereign Mesh security posture.
+//
+// Subcommands:
+//
+//	mysql-access     probe eu-db:3306 from every network vantage point to confirm ACLs
+//	source-ip        prove SNAT is disabled (containers keep distinct source IPs)
+//	transit-encrypt  packet-capture comparison of insecure vs. WireGuard paths
 package main
 
 import (

@@ -1,20 +1,14 @@
 ---
-# ═══════════════════════════════════════════════════════════════════════
-# Sovereign Mesh — Ansible Playbook
+# ── Sovereign Mesh — Ansible Orchestrator ────────────────────────────
 #
 # Usage:
 #   1. terraform apply
 #   2. bash ansible/generate-inventory.sh
 #   3. cd ansible && ansible-playbook site.yml
 #
-# Connection: uses custom orbstack connection plugin (no SSH needed).
-# All VMs are Ubuntu 22.04 (Jammy) on OrbStack.
-#
-# Structure:
-#   plays/          — one file per play (eu-db, eu-router, us-app, routes)
-#   templates/      — Jinja2 templates (docker-compose, server.js, admin.js)
-#   files/          — static files
-# ═══════════════════════════════════════════════════════════════════════
+# Plays run in order: provision EU DB → EU subnet router → US app
+# server → return routes on EU DB → insecure comparison demo.
+# ─────────────────────────────────────────────────────────────────────
 
 - import_playbook: plays/eu-db.yml
 - import_playbook: plays/eu-router.yml

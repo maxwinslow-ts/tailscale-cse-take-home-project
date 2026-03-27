@@ -1,8 +1,11 @@
 ---
 # ── EU Subnet Router (eu-router) ─────────────────────────────────────
 #
-# Tailscale subnet router advertising eu-db's bridge IP so the
-# US app can reach MySQL through the Tailscale mesh.
+# Tailscale subnet router that makes eu-db reachable from the US app
+# through the encrypted mesh. Key flags:
+#   --advertise-routes  exposes eu-db's bridge IP into the tailnet
+#   --snat-subnet-routes=false  preserves the real container source IP
+#   --accept-routes     accepts the US Docker subnet advertised by us-app
 #
 - name: Configure EU Subnet Router
   hosts: eu-router
@@ -38,6 +41,8 @@
       register: ts_result
       changed_when: ts_result.rc == 0
 
+    # Per Tailscale site-to-site docs: clamp TCP MSS so large segments
+    # aren't dropped due to WireGuard overhead reducing the effective MTU.
     - name: Clamp MSS to MTU (per Tailscale site-to-site docs)
       shell: |
         iptables -t mangle -C FORWARD -o tailscale0 -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \

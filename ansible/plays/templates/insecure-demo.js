@@ -1,3 +1,6 @@
+// Insecure Demo — US Viewer (port 3000, mapped to :8888).
+// Queries a local MySQL instance over plain HTTP with no Tailscale.
+// Exists solely to contrast with the encrypted mesh path.
 const http = require('http');
 const { execSync } = require('child_process');
 const PORT = 3000;

@@ -1,3 +1,6 @@
+// sourceip.go — Proves SNAT is disabled: each US container's real IP appears
+// as the source in MySQL's processlist, then live-tails the general query log
+// on eu-db to show connections color-coded by source container.
 package main
 
 import (
@@ -30,24 +33,13 @@ func sourceIPCmd() *cobra.Command {
 	return cmd
 }
 
-func discoverBindAddr() string {
-	res := orbRun("eu-db", `grep "^bind-address" /etc/mysql/mysql.conf.d/mysqld.cnf`)
-	if res.OK() {
-		parts := strings.Fields(res.Output())
-		if len(parts) >= 3 {
-			return parts[len(parts)-1]
-		}
-	}
-	return ""
-}
-
 func runSourceIPCheck(interval time.Duration) error {
 	passed, failed := 0, 0
 	p := func(msg string) { passed++; pass(msg) }
 	f := func(msg string) { failed++; fail(msg) }
 
 	// ── Discover bind address ────────────────────────────────────────
-	header("MySQL Configuration")
+	header("MySQL Configuration (eu-db)")
 	bindAddr := discoverBindAddr()
 	if bindAddr == "" {
 		f("Could not discover MySQL bind address from eu-db")
@@ -56,7 +48,7 @@ func runSourceIPCheck(interval time.Duration) error {
 	info(fmt.Sprintf("MySQL bind address: %s", bindAddr))
 
 	// ── Source IP Differentiation ────────────────────────────────────
-	header("Source IP Differentiation (SNAT disabled)")
+	header("Source IP Differentiation — us-app containers → eu-db (SNAT disabled)")
 
 	sourceIPQuery := fmt.Sprintf(
 		`timeout 5 mysql -h %s -u app -papppass -D app --skip-ssl -N -e "SELECT HOST FROM information_schema.processlist WHERE ID = CONNECTION_ID()" 2>/dev/null`,
@@ -102,17 +94,9 @@ func runSourceIPCheck(interval time.Duration) error {
 		f("Could not compare source IPs — one or both queries failed")
 	}
 
-	// ── Summary ──────────────────────────────────────────────────────
-	fmt.Printf("\n%s════════════════════════════════════════%s\n", bold, reset)
-	fmt.Printf("%s  Passed: %d%s  %s  Failed: %d%s\n", green, passed, reset, red, failed, reset)
-	if failed == 0 {
-		fmt.Printf("%s%s  All checks passed! ✅%s\n", green, bold, reset)
-	} else {
-		fmt.Printf("%s%s  Some checks failed. Review output above.%s\n", red, bold, reset)
-	}
-	fmt.Printf("%s════════════════════════════════════════%s\n", bold, reset)
+	printSummary(passed, failed)
 
-	// ── Live connection log ──────────────────────────────────────────
+	// ── Live MySQL connection log on eu-db ────────────────────────────
 	header("Live MySQL Connection Log")
 	fmt.Printf("%s  Tailing /var/log/mysql/general.log on eu-db…%s\n", dim, reset)
 	fmt.Printf("%s  Press Ctrl-C to stop%s\n\n", dim, reset)

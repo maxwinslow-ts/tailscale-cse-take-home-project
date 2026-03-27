@@ -1,3 +1,7 @@
+# Insecure comparison demo — local MySQL + Node viewer on an isolated
+# Docker bridge (172.22.0.0/24). No Tailscale, no encryption.
+# Used for side-by-side contrast with the encrypted Tailscale path.
+
 services:
   insecure-db:
     image: mysql:8.0
