@@ -12,11 +12,12 @@
 #
 # Structure:
 #   plays/          — one file per play (eu-db, eu-router, us-app, routes)
-#   templates/      — Jinja2 templates (docker-compose, server.js)
-#   files/          — static files copied as-is (healthcheck.js)
+#   templates/      — Jinja2 templates (docker-compose, server.js, admin.js)
+#   files/          — static files
 # ═══════════════════════════════════════════════════════════════════════
 
 - import_playbook: plays/eu-db.yml
 - import_playbook: plays/eu-router.yml
 - import_playbook: plays/us-app.yml
 - import_playbook: plays/eu-db-routes.yml
+- import_playbook: plays/insecure-demo.yml

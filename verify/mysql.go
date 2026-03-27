@@ -15,7 +15,7 @@ func mysqlCmd() *cobra.Command {
 	var pingCount int
 
 	cmd := &cobra.Command{
-		Use:   "mysql",
+		Use:   "mysql-access",
 		Short: "Verify MySQL is inaccessible outside Tailscale and run connectivity ping sweeps",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMySQLChecks(pingCount)
@@ -110,100 +110,124 @@ func runMySQLChecks(pingCount int) error {
 		expected bool // true = should succeed, false = should be blocked
 	}
 
+	const probeTimeout = 5 * time.Second
+
 	mysqlProbe := fmt.Sprintf(
-		`mysql -h %s -u app -papppass -D app --skip-ssl -e 'SELECT 1' 2>&1`,
+		`timeout 5 mysql -h %s -u app -papppass -D app --skip-ssl -e 'SELECT 1' 2>&1`,
 		bindAddr,
 	)
 
-	// For euroviewer-ts (Alpine), install mariadb-client first
+	// For us-app-ts (Alpine), install mariadb-client first then probe
 	mysqlProbeTsInstall := fmt.Sprintf(
 		`apk add --no-cache mariadb-client >/dev/null 2>&1; timeout 5 mariadb -h %s -u app -papppass -D app --skip-ssl -e 'SELECT 1' 2>&1`,
 		bindAddr,
 	)
 
-	// For eu-router, need to install mysql client
-	mysqlProbeRouter := fmt.Sprintf(
-		`timeout 5 mysql -h %s -u app -papppass -D app --skip-ssl -e 'SELECT 1' 2>&1 || timeout 5 bash -c 'echo "QUIT" | nc -w 5 %s 3306' 2>&1`,
+	// For eu-router / us-app host — try mysql then fall back to nc
+	mysqlProbeNC := fmt.Sprintf(
+		`timeout 5 mysql -h %s -u app -papppass -D app --skip-ssl -e 'SELECT 1' 2>&1 || timeout 5 bash -c 'echo QUIT | nc -w 5 %s 3306' 2>&1`,
 		bindAddr, bindAddr,
 	)
 
-	// For us-app VM host (not through Docker)
-	mysqlProbeHost := fmt.Sprintf(
-		`timeout 5 mysql -h %s -u app -papppass -D app --skip-ssl -e 'SELECT 1' 2>&1 || timeout 5 bash -c 'echo "QUIT" | nc -w 5 %s 3306' 2>&1`,
-		bindAddr, bindAddr,
-	)
-
-	// For Mac host — use nc TCP probe since mysql client may not be installed
+	// For Mac host — TCP probe with strict timeout
 	mysqlProbeMac := fmt.Sprintf(
-		`nc -z -w 5 %s 3306 2>&1`, bindAddr,
+		`nc -z -w 5 -G 5 %s 3306 2>&1`, bindAddr,
 	)
 
 	tests := []accessTest{
 		{
-			name: "euroviewer (172.21.0.10)",
+			name: "us-euro-viewer (172.21.0.10)",
 			run: func(probe string) runResult {
-				return dockerExecTimeout("euroviewer", probe, 15*time.Second)
+				return dockerExecTimeout("us-euro-viewer", probe, probeTimeout)
 			},
 			expected: true,
 		},
 		{
-			name: "healthcheck (172.21.0.20)",
+			name: "us-euro-viewer-admin (172.21.0.20)",
 			run: func(probe string) runResult {
-				return dockerExecTimeout("healthcheck", probe, 15*time.Second)
+				return dockerExecTimeout("us-euro-viewer-admin", probe, probeTimeout)
 			},
 			expected: true,
 		},
 		{
-			name: "euroviewer-ts (172.21.0.2)",
+			name: "us-app-ts (172.21.0.2)",
 			run: func(probe string) runResult {
-				return dockerExecTimeout("euroviewer-ts", mysqlProbeTsInstall, 30*time.Second)
+				return dockerExecTimeout("us-app-ts", mysqlProbeTsInstall, 15*time.Second)
 			},
 			expected: false,
 		},
 		{
 			name: "eu-router VM",
 			run: func(probe string) runResult {
-				return orbRunTimeout("eu-router", mysqlProbeRouter, 15*time.Second)
+				return orbRunTimeout("eu-router", mysqlProbeNC, probeTimeout)
 			},
 			expected: false,
 		},
 		{
 			name: "us-app VM host",
 			run: func(probe string) runResult {
-				return orbRunTimeout("us-app", mysqlProbeHost, 15*time.Second)
+				return orbRunTimeout("us-app", mysqlProbeNC, probeTimeout)
 			},
 			expected: false,
 		},
 		{
 			name: "Mac host (local)",
 			run: func(probe string) runResult {
-				return localRunTimeout(mysqlProbeMac, 10*time.Second)
+				return localRunTimeout(mysqlProbeMac, probeTimeout)
 			},
 			expected: false,
 		},
 	}
 
 	for _, t := range tests {
-		fmt.Printf("  %-30s ", t.name)
-		res := t.run(mysqlProbe)
+		// Run the probe in the background with a live "waiting" ticker
+		type result struct {
+			res       runResult
+			succeeded bool
+		}
+		ch := make(chan result, 1)
+		start := time.Now()
 
-		succeeded := res.OK() && !isBlocked(res)
-		if t.expected && succeeded {
+		go func() {
+			r := t.run(mysqlProbe)
+			ch <- result{res: r, succeeded: r.OK() && !isBlocked(r)}
+		}()
+
+		ticker := time.NewTicker(500 * time.Millisecond)
+		fmt.Printf("  %-30s %swaiting…%s", t.name, dim, reset)
+
+		var got result
+		done := false
+		for !done {
+			select {
+			case got = <-ch:
+				done = true
+			case <-ticker.C:
+				elapsed := time.Since(start).Seconds()
+				fmt.Printf("\r  %-30s %swaiting… %.0fs%s", t.name, dim, elapsed, reset)
+			}
+		}
+		ticker.Stop()
+		elapsed := time.Since(start)
+
+		// Clear the waiting line and print result
+		fmt.Printf("\r  %-30s ", t.name)
+		if t.expected && got.succeeded {
 			passed++
-			fmt.Printf("%s✔ ALLOWED%s  (query returned successfully)\n", green, reset)
-		} else if t.expected && !succeeded {
+			fmt.Printf("%s✔ ALLOWED%s  (query returned — %.1fs)\n", green, reset, elapsed.Seconds())
+		} else if t.expected && !got.succeeded {
 			failed++
-			detail := strings.TrimSpace(res.Stderr + " " + res.Stdout)
+			detail := strings.TrimSpace(got.res.Stderr + " " + got.res.Stdout)
 			if detail == "" {
 				detail = "no output"
 			}
-			fmt.Printf("%s✘ BLOCKED%s  (expected ALLOWED) — %s\n", red, reset, truncate(detail, 80))
-		} else if !t.expected && !succeeded {
+			fmt.Printf("%s✘ BLOCKED%s  (expected ALLOWED — %.1fs) — %s\n", red, reset, elapsed.Seconds(), truncate(detail, 60))
+		} else if !t.expected && !got.succeeded {
 			passed++
-			fmt.Printf("%s✔ BLOCKED%s  (ACL enforced)\n", green, reset)
+			fmt.Printf("%s✔ BLOCKED%s  (no response — %.1fs, ACL enforced)\n", green, reset, elapsed.Seconds())
 		} else {
 			failed++
-			fmt.Printf("%s✘ ALLOWED%s  (expected BLOCKED) — ACL NOT enforced\n", red, reset)
+			fmt.Printf("%s✘ ALLOWED%s  (expected BLOCKED — %.1fs) — ACL NOT enforced\n", red, reset, elapsed.Seconds())
 		}
 	}
 
@@ -219,24 +243,24 @@ func runMySQLChecks(pingCount int) error {
 
 	sources := []pingSource{
 		{
-			name: "euroviewer",
+			name: "us-euro-viewer",
 			note: "Docker 172.21.0.10 → Tailscale mesh → eu-db",
 			ping: func() runResult {
-				return dockerExecTimeout("euroviewer", fmt.Sprintf("ping -c 1 -W 3 %s", bindAddr), 8*time.Second)
+				return dockerExecTimeout("us-euro-viewer", fmt.Sprintf("ping -c 1 -W 3 %s", bindAddr), 8*time.Second)
 			},
 		},
 		{
-			name: "healthcheck",
+			name: "us-euro-viewer-admin",
 			note: "Docker 172.21.0.20 → Tailscale mesh → eu-db",
 			ping: func() runResult {
-				return dockerExecTimeout("healthcheck", fmt.Sprintf("ping -c 1 -W 3 %s", bindAddr), 8*time.Second)
+				return dockerExecTimeout("us-euro-viewer-admin", fmt.Sprintf("ping -c 1 -W 3 %s", bindAddr), 8*time.Second)
 			},
 		},
 		{
-			name: "euroviewer-ts",
+			name: "us-app-ts",
 			note: "Tailscale sidecar 172.21.0.2 → mesh → eu-db",
 			ping: func() runResult {
-				return dockerExecTimeout("euroviewer-ts", fmt.Sprintf("ping -c 1 -W 3 %s", bindAddr), 8*time.Second)
+				return dockerExecTimeout("us-app-ts", fmt.Sprintf("ping -c 1 -W 3 %s", bindAddr), 8*time.Second)
 			},
 		},
 		{

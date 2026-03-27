@@ -2,7 +2,7 @@
 # ── US Application Server (us-app) ───────────────────────────────────
 #
 # Docker host running a Tailscale container (mesh endpoint),
-# a Node.js "euroviewer" app, and a health-check dashboard.
+# us-euro-viewer (read-only), and us-euro-viewer-admin (read/write).
 #
 - name: Configure US Application Server
   hosts: us-app
@@ -39,18 +39,18 @@
         src: docker-compose.yaml.j2
         dest: /opt/stack/docker-compose.yaml
 
-    - name: Write server.js
+    - name: Write server.js (us-euro-viewer)
       template:
         src: server.js.j2
         dest: /opt/stack/server.js
 
-    - name: Write healthcheck.js
-      copy:
-        src: healthcheck.js
-        dest: /opt/stack/healthcheck.js
+    - name: Write admin.js (us-euro-viewer-admin)
+      template:
+        src: admin.js.j2
+        dest: /opt/stack/admin.js
 
     - name: Start Docker Compose stack
-      command: docker compose -f /opt/stack/docker-compose.yaml up -d
+      command: docker compose -f /opt/stack/docker-compose.yaml up -d --remove-orphans
       args:
         chdir: /opt/stack
 

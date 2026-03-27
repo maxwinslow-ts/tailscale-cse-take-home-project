@@ -1,0 +1,215 @@
+const http = require('http');
+const { execSync } = require('child_process');
+const PORT = 3001;
+const DB_IP = '{{ eu_db_bridge_ip }}';
+
+const COUNTRIES = {
+  'Albania': '🇦🇱', 'Andorra': '🇦🇩', 'Austria': '🇦🇹', 'Belarus': '🇧🇾',
+  'Belgium': '🇧🇪', 'Bosnia and Herzegovina': '🇧🇦', 'Bulgaria': '🇧🇬',
+  'Croatia': '🇭🇷', 'Cyprus': '🇨🇾', 'Czech Republic': '🇨🇿', 'Denmark': '🇩🇰',
+  'England': '🏴󠁧󠁢󠁥󠁮󠁧󠁿', 'Estonia': '🇪🇪', 'Finland': '🇫🇮', 'France': '🇫🇷',
+  'Germany': '🇩🇪', 'Greece': '🇬🇷', 'Hungary': '🇭🇺', 'Iceland': '🇮🇸',
+  'Ireland': '🇮🇪', 'Italy': '🇮🇹', 'Kosovo': '🇽🇰', 'Latvia': '🇱🇻',
+  'Liechtenstein': '🇱🇮', 'Lithuania': '🇱🇹', 'Luxembourg': '🇱🇺',
+  'Malta': '🇲🇹', 'Moldova': '🇲🇩', 'Monaco': '🇲🇨', 'Montenegro': '🇲🇪',
+  'Netherlands': '🇳🇱', 'North Macedonia': '🇲🇰', 'Norway': '🇳🇴',
+  'Poland': '🇵🇱', 'Portugal': '🇵🇹', 'Romania': '🇷🇴', 'Russia': '🇷🇺',
+  'San Marino': '🇸🇲', 'Scotland': '🏴󠁧󠁢󠁳󠁣󠁴󠁿', 'Serbia': '🇷🇸',
+  'Slovakia': '🇸🇰', 'Slovenia': '🇸🇮', 'Spain': '🇪🇸', 'Sweden': '🇸🇪',
+  'Switzerland': '🇨🇭', 'Ukraine': '🇺🇦', 'Wales': '🏴󠁧󠁢󠁷󠁬󠁳󠁿',
+};
+
+function queryEuropeans() {
+  const raw = execSync(
+    'mysql -h ' + DB_IP + ' -u appadmin -padminpass -D app --skip-ssl --default-character-set=utf8mb4 ' +
+    '-e "SELECT FirstName, LastName, Flag, CountryOfOrigin FROM famous_europeans ORDER BY RAND() LIMIT 3" ' +
+    '--batch --raw 2>/dev/null',
+    { timeout: 10000, encoding: 'utf8' }
+  );
+  const lines = raw.trim().split('\n');
+  const headers = lines[0].split('\t');
+  return lines.slice(1).map(l => {
+    const v = l.split('\t');
+    return Object.fromEntries(headers.map((h, i) => [h, v[i]]));
+  });
+}
+
+function insertEuropean(firstName, lastName, country) {
+  const flag = COUNTRIES[country];
+  if (!flag) throw new Error('Unknown country: ' + country);
+  if (!firstName || !lastName) throw new Error('First name and last name are required');
+  // Escape single quotes to prevent SQL injection
+  const esc = s => s.replace(/'/g, "''").replace(/\\/g, '\\\\');
+  const sql = "INSERT INTO famous_europeans (FirstName, LastName, CountryOfOrigin, Flag) VALUES ('" +
+    esc(firstName) + "', '" + esc(lastName) + "', '" + esc(country) + "', '" + flag + "')";
+  execSync(
+    'mysql -h ' + DB_IP + ' -u appadmin -padminpass -D app --skip-ssl --default-character-set=utf8mb4 ' +
+    '-e ' + JSON.stringify(sql) + ' 2>&1',
+    { timeout: 10000, encoding: 'utf8' }
+  );
+}
+
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 4096) reject(new Error('Body too large')); });
+    req.on('end', () => resolve(body));
+  });
+}
+
+function countryOptions() {
+  return Object.keys(COUNTRIES).sort().map(c =>
+    '            <option value="' + c + '">' + COUNTRIES[c] + ' ' + c + '</option>'
+  ).join('\n');
+}
+
+const CSS =
+'  * { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+'  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;\n' +
+'         background: #1a202c; display: flex; justify-content: center; align-items: flex-start;\n' +
+'         min-height: 100vh; color: #e2e8f0; padding: 2rem; }\n' +
+'  .wrap { max-width: 640px; width: 100%; }\n' +
+'  .card { background: #2d3748; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.3);\n' +
+'          padding: 2rem 2.5rem; margin-bottom: 1.5rem; }\n' +
+'  h1 { font-size: 1.5rem; margin-bottom: .25rem; color: #f7fafc; }\n' +
+'  h2 { font-size: 1.2rem; margin-bottom: 1rem; color: #f7fafc; }\n' +
+'  p.sub { color: #a0aec0; margin-bottom: 1.5rem; font-size: .9rem; }\n' +
+'  table { width: 100%; border-collapse: collapse; }\n' +
+'  th { text-align: left; padding: .75rem 1rem; background: #4a5568; color: #e2e8f0;\n' +
+'       font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }\n' +
+'  td { padding: .75rem 1rem; border-bottom: 1px solid #4a5568; color: #e2e8f0; }\n' +
+'  tr:last-child td { border-bottom: none; }\n' +
+'  .actions { margin-top: 1.5rem; text-align: center; }\n' +
+'  .actions button { display: inline-block; padding: .5rem 1.25rem; background: #4299e1;\n' +
+'               color: #fff; border-radius: 6px; font-size: .9rem;\n' +
+'               margin: 0 .25rem; border: none; cursor: pointer; }\n' +
+'  .actions button:hover { background: #3182ce; }\n' +
+'  label { display: block; font-size: .85rem; color: #a0aec0; margin-bottom: .25rem; margin-top: .75rem; }\n' +
+'  input, select { width: 100%; padding: .5rem .75rem; border: 1px solid #4a5568; border-radius: 6px;\n' +
+'                  font-size: .9rem; margin-bottom: .25rem; background: #1a202c; color: #e2e8f0; }\n' +
+'  input::placeholder { color: #718096; }\n' +
+'  .msg { padding: .75rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: .9rem; }\n' +
+'  .msg.ok { background: #22543d; color: #c6f6d5; }\n' +
+'  .msg.err { background: #9b2c2c; color: #fed7d7; }\n' +
+'  .timer { margin-top: 1.5rem; text-align: center; }\n' +
+'  .timer-label { font-size: .8rem; color: #a0aec0; margin-bottom: .5rem; }\n' +
+'  .timer-bar { height: 4px; background: #4a5568; border-radius: 2px; overflow: hidden; }\n' +
+'  .timer-fill { height: 100%; background: #4299e1; border-radius: 2px;\n' +
+'                width: 100%; animation: countdown 5s linear forwards; }\n' +
+'  .timer-fill.paused { animation-play-state: paused; }\n' +
+'  .pause-btn { margin-top: .75rem; padding: .35rem 1rem; background: #4a5568; color: #e2e8f0;\n' +
+'              border: none; border-radius: 6px; font-size: .8rem; cursor: pointer; }\n' +
+'  .pause-btn:hover { background: #718096; }\n' +
+'  @keyframes countdown { from { width: 100%; } to { width: 0%; } }\n';
+
+const server = http.createServer(async (req, res) => {
+  // ── POST /add — insert a new European ──
+  if (req.method === 'POST' && req.url === '/add') {
+    try {
+      const body = await parseBody(req);
+      const params = new URLSearchParams(body);
+      const firstName = (params.get('firstName') || '').trim();
+      const lastName = (params.get('lastName') || '').trim();
+      const country = (params.get('country') || '').trim();
+      insertEuropean(firstName, lastName, country);
+      res.writeHead(302, { Location: '/?msg=ok&name=' + encodeURIComponent(firstName + ' ' + lastName) });
+      res.end();
+    } catch (err) {
+      const errMsg = encodeURIComponent(err.message || 'Unknown error');
+      res.writeHead(302, { Location: '/?msg=err&detail=' + errMsg });
+      res.end();
+    }
+    return;
+  }
+
+  // ── GET /table — partial HTML for AJAX table refresh ──
+  if (req.url === '/table') {
+    try {
+      const rows = queryEuropeans();
+      const tableRows = rows.map(r =>
+        '<tr><td>' + r.FirstName + '</td><td>' + r.LastName + '</td><td>' + r.Flag + ' ' + r.CountryOfOrigin + '</td></tr>'
+      ).join('\n');
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(tableRows);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end(err.message);
+    }
+    return;
+  }
+
+  // ── GET / — HTML viewer + admin form ──
+  try {
+    const url = new URL(req.url, 'http://localhost');
+    const msg = url.searchParams.get('msg');
+    const rows = queryEuropeans();
+    const tableRows = rows.map(r =>
+      '<tr><td>' + r.FirstName + '</td><td>' + r.LastName + '</td><td>' + r.Flag + ' ' + r.CountryOfOrigin + '</td></tr>'
+    ).join('\n');
+
+    let banner = '';
+    if (msg === 'ok') {
+      const name = url.searchParams.get('name') || '';
+      banner = '<div class="msg ok">\u2714 Successfully added <b>' + name + '</b> to the database.</div>';
+    } else if (msg === 'err') {
+      const detail = url.searchParams.get('detail') || 'Unknown error';
+      banner = '<div class="msg err">\u2718 Error: ' + detail + '</div>';
+    }
+
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!DOCTYPE html>\n' +
+'<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n' +
+'<title>US Euro Viewer \u2014 Admin</title>\n' +
+'<style>\n' + CSS + '</style></head><body>\n' +
+'<div class="wrap">\n' +
+banner +
+'  <div class="card">\n' +
+'    <h1>Famous Europeans</h1>\n' +
+'    <p class="sub">3 random selections from the EU database</p>\n' +
+'    <table>\n' +
+'      <thead><tr><th>First Name</th><th>Last Name</th><th>Country</th></tr></thead>\n' +
+'      <tbody id="rows">' + tableRows + '</tbody>\n' +
+'    </table>\n' +
+'    <div class="timer">\n' +
+'      <div class="timer-label">Refreshing in <span id="sec">5</span>s</div>\n' +
+'      <div class="timer-bar"><div class="timer-fill" id="bar"></div></div>\n' +
+'      <button class="pause-btn" id="pauseBtn">Pause</button>\n' +
+'    </div>\n' +
+'  </div>\n' +
+'  <div class="card">\n' +
+'    <h2>Add a Famous European</h2>\n' +
+'    <form method="POST" action="/add">\n' +
+'      <label for="firstName">First Name</label>\n' +
+'      <input type="text" id="firstName" name="firstName" required maxlength="64" placeholder="e.g. Ada">\n' +
+'      <label for="lastName">Last Name</label>\n' +
+'      <input type="text" id="lastName" name="lastName" required maxlength="64" placeholder="e.g. Lovelace">\n' +
+'      <label for="country">Country</label>\n' +
+'      <select id="country" name="country" required>\n' +
+'        <option value="">\u2014 Select country \u2014</option>\n' +
+countryOptions() + '\n' +
+'      </select>\n' +
+'      <div class="actions" style="margin-top:1rem;">\n' +
+'        <button type="submit">Add European</button>\n' +
+'      </div>\n' +
+'    </form>\n' +
+'  </div>\n' +
+'</div>\n' +
+'<script>\n' +
+'let t=5, paused=false;\n' +
+'const el=document.getElementById("sec"), bar=document.getElementById("bar"), rows=document.getElementById("rows"), btn=document.getElementById("pauseBtn");\n' +
+'btn.onclick=()=>{ paused=!paused; btn.textContent=paused?"Resume":"Pause";\n' +
+'  bar.classList.toggle("paused",paused); };\n' +
+'setInterval(()=>{\n' +
+'  if(paused) return;\n' +
+'  t--; el.textContent=t;\n' +
+'  if(t<=0){ t=5; bar.style.animation="none"; bar.offsetHeight; bar.style.animation="countdown 5s linear forwards";\n' +
+'    fetch("/table").then(r=>r.text()).then(h=>{rows.innerHTML=h;}).catch(()=>{}); }\n' +
+'},1000);\n' +
+'</script>\n' +
+'</body></html>');
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'text/html' });
+    res.end('<h1>Error</h1><pre>' + err.message + '</pre>');
+  }
+});
+server.listen(PORT, () => console.log('US Euro Viewer Admin listening on ' + PORT));
