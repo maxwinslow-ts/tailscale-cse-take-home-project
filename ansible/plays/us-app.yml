@@ -1,0 +1,61 @@
+---
+# ── US Application Server (us-app) ───────────────────────────────────
+#
+# Docker host running a Tailscale container (mesh endpoint),
+# a Node.js "euroviewer" app, and a health-check dashboard.
+#
+- name: Configure US Application Server
+  hosts: us-app
+  become: true
+  tasks:
+    - name: Install Docker packages
+      apt:
+        name: [docker.io, docker-compose-v2]
+        state: present
+        update_cache: true
+
+    - name: Configure Docker daemon (disable userland-proxy)
+      copy:
+        dest: /etc/docker/daemon.json
+        content: '{ "userland-proxy": false }'
+      notify: restart docker
+
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Flush handlers (restart docker if config changed)
+      meta: flush_handlers
+
+    - name: Create stack directory
+      file:
+        path: /opt/stack
+        state: directory
+
+    - name: Write docker-compose.yaml
+      template:
+        src: docker-compose.yaml.j2
+        dest: /opt/stack/docker-compose.yaml
+
+    - name: Write server.js
+      template:
+        src: server.js.j2
+        dest: /opt/stack/server.js
+
+    - name: Write healthcheck.js
+      copy:
+        src: healthcheck.js
+        dest: /opt/stack/healthcheck.js
+
+    - name: Start Docker Compose stack
+      command: docker compose -f /opt/stack/docker-compose.yaml up -d
+      args:
+        chdir: /opt/stack
+
+  handlers:
+    - name: restart docker
+      service:
+        name: docker
+        state: restarted

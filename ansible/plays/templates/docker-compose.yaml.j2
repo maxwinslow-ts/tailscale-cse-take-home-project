@@ -1,0 +1,80 @@
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: us-app
+    container_name: euroviewer-ts
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - /var/lib/tailscale:/var/lib/tailscale
+    environment:
+      - TS_AUTHKEY={{ ts_authkey }}
+      - TS_HOSTNAME=us-app
+      - TS_USERSPACE=false
+      - TS_EXTRA_ARGS=--advertise-routes=172.21.0.0/24 --accept-routes --snat-subnet-routes=false --ssh
+    networks:
+      mesh:
+        ipv4_address: 172.21.0.2
+    restart: always
+
+  app:
+    image: node:18-alpine
+    container_name: euroviewer
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      - tailscale
+    ports:
+      - "80:3000"
+    networks:
+      mesh:
+        ipv4_address: 172.21.0.10
+    volumes:
+      - /opt/stack/server.js:/app/server.js:ro
+    command:
+      - sh
+      - -c
+      - |
+        sleep 5
+        apk add --no-cache iproute2 mysql-client >/dev/null 2>&1
+        ip route add {{ eu_db_bridge_ip }}/32 via 172.21.0.2 2>/dev/null || true
+        ip route add 100.64.0.0/10 via 172.21.0.2 2>/dev/null || true
+        node /app/server.js
+    restart: always
+
+  healthcheck:
+    image: node:18-alpine
+    container_name: healthcheck
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      - tailscale
+      - app
+    ports:
+      - "8080:8080"
+    networks:
+      mesh:
+        ipv4_address: 172.21.0.20
+    volumes:
+      - /opt/stack/healthcheck.js:/app/healthcheck.js:ro
+    environment:
+      - EU_DB_BRIDGE_IP={{ eu_db_bridge_ip }}
+    command:
+      - sh
+      - -c
+      - |
+        sleep 8
+        apk add --no-cache iproute2 mysql-client curl >/dev/null 2>&1
+        ip route add {{ eu_db_bridge_ip }}/32 via 172.21.0.2 2>/dev/null || true
+        ip route add 100.64.0.0/10 via 172.21.0.2 2>/dev/null || true
+        node /app/healthcheck.js
+    restart: always
+
+networks:
+  mesh:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24

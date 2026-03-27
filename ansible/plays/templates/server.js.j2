@@ -1,0 +1,86 @@
+const http = require('http');
+const { execSync } = require('child_process');
+const PORT = 3000;
+const DB_IP = '{{ eu_db_bridge_ip }}';
+
+function queryEuropeans() {
+  const raw = execSync(
+    'mysql -h ' + DB_IP + ' -u app -papppass -D app --skip-ssl --default-character-set=utf8mb4 ' +
+    '-e "SELECT FirstName, LastName, Flag, CountryOfOrigin FROM famous_europeans ORDER BY RAND() LIMIT 3" ' +
+    '--batch --raw 2>/dev/null',
+    { timeout: 10000, encoding: 'utf8' }
+  );
+  const lines = raw.trim().split('\n');
+  const headers = lines[0].split('\t');
+  return lines.slice(1).map(l => {
+    const v = l.split('\t');
+    return Object.fromEntries(headers.map((h, i) => [h, v[i]]));
+  });
+}
+
+const server = http.createServer((req, res) => {
+  if (req.url === '/json') {
+    try {
+      const rows = queryEuropeans();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ source: 'eu-db', europeans: rows }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // Root endpoint — HTML table
+  try {
+    const rows = queryEuropeans();
+    const tableRows = rows.map(r =>
+      '<tr><td>' + r.FirstName + '</td><td>' + r.LastName + '</td><td>' + r.Flag + ' ' + r.CountryOfOrigin + '</td></tr>'
+    ).join('\n              ');
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!DOCTYPE html>\n' +
+      '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n' +
+      '<title>European Viewer</title>\n' +
+      '<style>\n' +
+      '  * { margin: 0; padding: 0; box-sizing: border-box; }\n' +
+      '  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;\n' +
+      '         background: #f0f4f8; display: flex; justify-content: center; align-items: center;\n' +
+      '         min-height: 100vh; color: #1a202c; }\n' +
+      '  .card { background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.08);\n' +
+      '          padding: 2rem 2.5rem; max-width: 600px; width: 100%; }\n' +
+      '  h1 { font-size: 1.5rem; margin-bottom: .25rem; }\n' +
+      '  p.sub { color: #718096; margin-bottom: 1.5rem; font-size: .9rem; }\n' +
+      '  table { width: 100%; border-collapse: collapse; }\n' +
+      '  th { text-align: left; padding: .75rem 1rem; background: #edf2f7; color: #4a5568;\n' +
+      '       font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }\n' +
+      '  td { padding: .75rem 1rem; border-bottom: 1px solid #e2e8f0; }\n' +
+      '  tr:last-child td { border-bottom: none; }\n' +
+      '  .actions { margin-top: 1.5rem; text-align: center; }\n' +
+      '  .actions a { display: inline-block; padding: .5rem 1.25rem; background: #4299e1;\n' +
+      '               color: #fff; border-radius: 6px; text-decoration: none; font-size: .9rem;\n' +
+      '               margin: 0 .25rem; }\n' +
+      '  .actions a:hover { background: #3182ce; }\n' +
+      '  .actions a.secondary { background: #e2e8f0; color: #4a5568; }\n' +
+      '  .actions a.secondary:hover { background: #cbd5e0; }\n' +
+      '</style></head><body>\n' +
+      '<div class="card">\n' +
+      '  <h1>Famous Europeans</h1>\n' +
+      '  <p class="sub">3 random selections from the EU database</p>\n' +
+      '  <table>\n' +
+      '    <thead><tr><th>First Name</th><th>Last Name</th><th>Country</th></tr></thead>\n' +
+      '    <tbody>\n' +
+      '      ' + tableRows + '\n' +
+      '    </tbody>\n' +
+      '  </table>\n' +
+      '  <div class="actions">\n' +
+      '    <a href="/">Refresh</a>\n' +
+      '    <a class="secondary" href="/json">JSON</a>\n' +
+      '  </div>\n' +
+      '</div>\n' +
+      '</body></html>');
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'text/html' });
+    res.end('<h1>Error</h1><pre>' + err.message + '</pre>');
+  }
+});
+server.listen(PORT, () => console.log('European Viewer listening on ' + PORT));

@@ -1,0 +1,178 @@
+---
+# ── EU Database Server (eu-db) ───────────────────────────────────────
+#
+# MySQL server reachable only on the OrbStack bridge IP,
+# Tailscale installed for SSH management only (no routes).
+#
+- name: Configure EU Database Server
+  hosts: eu-db
+  become: true
+  tasks:
+    - name: Install packages
+      apt:
+        name: [mysql-server, curl, tcpdump]
+        state: present
+        update_cache: true
+
+    - name: Install Tailscale
+      shell: curl -fsSL https://tailscale.com/install.sh | sh
+      args:
+        creates: /usr/bin/tailscale
+
+    - name: Join tailnet (SSH management only — no routes)
+      command: >-
+        tailscale up
+        --authkey={{ ts_authkey }}
+        --hostname=eu-db
+        --ssh
+      register: ts_result
+      changed_when: ts_result.rc == 0
+
+    - name: Bind MySQL to bridge IP only
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^bind-address'
+        line: "bind-address = {{ orb_bridge_ip }}"
+      notify: restart mysql
+
+    - name: Restart MySQL now
+      meta: flush_handlers
+
+    - name: Seed demo database
+      shell: |
+        mysql -u root <<'SQL'
+        CREATE DATABASE IF NOT EXISTS app;
+        USE app;
+        CREATE TABLE IF NOT EXISTS demo (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          region VARCHAR(32) NOT NULL,
+          message VARCHAR(255) NOT NULL
+        );
+        INSERT INTO demo (region, message)
+        SELECT 'eu', 'Hello from the EU database'
+        WHERE NOT EXISTS (SELECT 1 FROM demo WHERE region='eu' LIMIT 1);
+        CREATE USER IF NOT EXISTS 'app'@'%' IDENTIFIED WITH mysql_native_password BY 'apppass';
+        GRANT SELECT ON app.* TO 'app'@'%';
+        FLUSH PRIVILEGES;
+        SQL
+
+    - name: Seed famous Europeans table
+      shell: |
+        mysql -u root <<'SQL'
+        USE app;
+        DROP TABLE IF EXISTS famous_europeans;
+        CREATE TABLE famous_europeans (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          FirstName VARCHAR(64) NOT NULL,
+          LastName VARCHAR(64) NOT NULL,
+          CountryOfOrigin VARCHAR(64) NOT NULL,
+          Flag VARCHAR(16) NOT NULL
+        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        INSERT INTO famous_europeans (FirstName, LastName, CountryOfOrigin, Flag) VALUES
+          ('Leonardo', 'da Vinci', 'Italy', '🇮🇹'),
+          ('Wolfgang', 'Mozart', 'Austria', '🇦🇹'),
+          ('Marie', 'Curie', 'Poland', '🇵🇱'),
+          ('Albert', 'Einstein', 'Germany', '🇩🇪'),
+          ('Isaac', 'Newton', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('Galileo', 'Galilei', 'Italy', '🇮🇹'),
+          ('Ludwig', 'van Beethoven', 'Germany', '🇩🇪'),
+          ('William', 'Shakespeare', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('Nikola', 'Tesla', 'Croatia', '🇭🇷'),
+          ('Charles', 'Darwin', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('Michelangelo', 'Buonarroti', 'Italy', '🇮🇹'),
+          ('Rembrandt', 'van Rijn', 'Netherlands', '🇳🇱'),
+          ('Johann Sebastian', 'Bach', 'Germany', '🇩🇪'),
+          ('Claude', 'Monet', 'France', '🇫🇷'),
+          ('Vincent', 'van Gogh', 'Netherlands', '🇳🇱'),
+          ('Pablo', 'Picasso', 'Spain', '🇪🇸'),
+          ('Frederic', 'Chopin', 'Poland', '🇵🇱'),
+          ('Hans Christian', 'Andersen', 'Denmark', '🇩🇰'),
+          ('Nicolaus', 'Copernicus', 'Poland', '🇵🇱'),
+          ('Johannes', 'Gutenberg', 'Germany', '🇩🇪'),
+          ('Louis', 'Pasteur', 'France', '🇫🇷'),
+          ('Alexander', 'Fleming', 'Scotland', '🏴󠁧󠁢󠁳󠁣󠁴󠁿'),
+          ('Niels', 'Bohr', 'Denmark', '🇩🇰'),
+          ('Max', 'Planck', 'Germany', '🇩🇪'),
+          ('Dmitri', 'Mendeleev', 'Russia', '🇷🇺'),
+          ('Michael', 'Faraday', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('James Clerk', 'Maxwell', 'Scotland', '🏴󠁧󠁢󠁳󠁣󠁴󠁿'),
+          ('Leonhard', 'Euler', 'Switzerland', '🇨🇭'),
+          ('Carl Friedrich', 'Gauss', 'Germany', '🇩🇪'),
+          ('Blaise', 'Pascal', 'France', '🇫🇷'),
+          ('Rene', 'Descartes', 'France', '🇫🇷'),
+          ('Johannes', 'Kepler', 'Germany', '🇩🇪'),
+          ('Tycho', 'Brahe', 'Denmark', '🇩🇰'),
+          ('Antonio', 'Vivaldi', 'Italy', '🇮🇹'),
+          ('Giuseppe', 'Verdi', 'Italy', '🇮🇹'),
+          ('Giacomo', 'Puccini', 'Italy', '🇮🇹'),
+          ('Franz', 'Schubert', 'Austria', '🇦🇹'),
+          ('Franz', 'Liszt', 'Hungary', '🇭🇺'),
+          ('Johannes', 'Brahms', 'Germany', '🇩🇪'),
+          ('Pyotr', 'Tchaikovsky', 'Russia', '🇷🇺'),
+          ('Igor', 'Stravinsky', 'Russia', '🇷🇺'),
+          ('Claude', 'Debussy', 'France', '🇫🇷'),
+          ('Edvard', 'Grieg', 'Norway', '🇳🇴'),
+          ('Jean', 'Sibelius', 'Finland', '🇫🇮'),
+          ('Salvador', 'Dali', 'Spain', '🇪🇸'),
+          ('Henri', 'Matisse', 'France', '🇫🇷'),
+          ('Pierre-Auguste', 'Renoir', 'France', '🇫🇷'),
+          ('Paul', 'Cezanne', 'France', '🇫🇷'),
+          ('Sandro', 'Botticelli', 'Italy', '🇮🇹'),
+          ('Raphael', 'Sanzio', 'Italy', '🇮🇹'),
+          ('Jan', 'Vermeer', 'Netherlands', '🇳🇱'),
+          ('Albrecht', 'Durer', 'Germany', '🇩🇪'),
+          ('Edvard', 'Munch', 'Norway', '🇳🇴'),
+          ('Gustav', 'Klimt', 'Austria', '🇦🇹'),
+          ('Piet', 'Mondrian', 'Netherlands', '🇳🇱'),
+          ('Auguste', 'Rodin', 'France', '🇫🇷'),
+          ('Edgar', 'Degas', 'France', '🇫🇷'),
+          ('Leo', 'Tolstoy', 'Russia', '🇷🇺'),
+          ('Fyodor', 'Dostoevsky', 'Russia', '🇷🇺'),
+          ('Victor', 'Hugo', 'France', '🇫🇷'),
+          ('Jules', 'Verne', 'France', '🇫🇷'),
+          ('Alexandre', 'Dumas', 'France', '🇫🇷'),
+          ('Miguel', 'de Cervantes', 'Spain', '🇪🇸'),
+          ('Dante', 'Alighieri', 'Italy', '🇮🇹'),
+          ('Johann Wolfgang', 'von Goethe', 'Germany', '🇩🇪'),
+          ('Henrik', 'Ibsen', 'Norway', '🇳🇴'),
+          ('Anton', 'Chekhov', 'Russia', '🇷🇺'),
+          ('Charles', 'Dickens', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('Jane', 'Austen', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('Agatha', 'Christie', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('Jacob', 'Grimm', 'Germany', '🇩🇪'),
+          ('Astrid', 'Lindgren', 'Sweden', '🇸🇪'),
+          ('Maria', 'Montessori', 'Italy', '🇮🇹'),
+          ('Florence', 'Nightingale', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('Alfred', 'Nobel', 'Sweden', '🇸🇪'),
+          ('Guglielmo', 'Marconi', 'Italy', '🇮🇹'),
+          ('Alexander Graham', 'Bell', 'Scotland', '🏴󠁧󠁢󠁳󠁣󠁴󠁿'),
+          ('Tim', 'Berners-Lee', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('James', 'Watt', 'Scotland', '🏴󠁧󠁢󠁳󠁣󠁴󠁿'),
+          ('Robert', 'Koch', 'Germany', '🇩🇪'),
+          ('Edward', 'Jenner', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('Enrico', 'Fermi', 'Italy', '🇮🇹'),
+          ('Georg Friedrich', 'Handel', 'Germany', '🇩🇪'),
+          ('Robert', 'Schumann', 'Germany', '🇩🇪'),
+          ('Felix', 'Mendelssohn', 'Germany', '🇩🇪'),
+          ('Antonin', 'Dvorak', 'Czech Republic', '🇨🇿'),
+          ('Bedrich', 'Smetana', 'Czech Republic', '🇨🇿'),
+          ('Carl', 'Linnaeus', 'Sweden', '🇸🇪'),
+          ('Anders', 'Celsius', 'Sweden', '🇸🇪'),
+          ('Sergei', 'Rachmaninoff', 'Russia', '🇷🇺'),
+          ('Hector', 'Berlioz', 'France', '🇫🇷'),
+          ('Camille', 'Saint-Saens', 'France', '🇫🇷'),
+          ('Gregor', 'Mendel', 'Austria', '🇦🇹'),
+          ('Ada', 'Lovelace', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('Rosalind', 'Franklin', 'England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'),
+          ('Lise', 'Meitner', 'Austria', '🇦🇹'),
+          ('Antoine', 'Lavoisier', 'France', '🇫🇷'),
+          ('Werner', 'Heisenberg', 'Germany', '🇩🇪'),
+          ('Nils Henrik', 'Abel', 'Norway', '🇳🇴'),
+          ('Sofia', 'Kovalevskaya', 'Russia', '🇷🇺');
+        SQL
+
+  handlers:
+    - name: restart mysql
+      service:
+        name: mysql
+        state: restarted

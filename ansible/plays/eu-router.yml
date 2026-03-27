@@ -1,0 +1,44 @@
+---
+# ── EU Subnet Router (eu-router) ─────────────────────────────────────
+#
+# Tailscale subnet router advertising eu-db's bridge IP so the
+# US app can reach MySQL through the Tailscale mesh.
+#
+- name: Configure EU Subnet Router
+  hosts: eu-router
+  become: true
+  tasks:
+    - name: Install curl
+      apt:
+        name: [curl]
+        state: present
+        update_cache: true
+
+    - name: Enable IP forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        sysctl_set: true
+        reload: true
+
+    - name: Install Tailscale
+      shell: curl -fsSL https://tailscale.com/install.sh | sh
+      args:
+        creates: /usr/bin/tailscale
+
+    - name: Join tailnet as subnet router
+      command: >
+        tailscale up
+        --authkey={{ ts_authkey }}
+        --hostname=eu-router
+        --advertise-routes={{ eu_db_bridge_ip }}/32
+        --accept-routes
+        --snat-subnet-routes=false
+        --ssh
+      register: ts_result
+      changed_when: ts_result.rc == 0
+
+    - name: Clamp MSS to MTU (per Tailscale site-to-site docs)
+      shell: |
+        iptables -t mangle -C FORWARD -o tailscale0 -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
+        iptables -t mangle -A FORWARD -o tailscale0 -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
