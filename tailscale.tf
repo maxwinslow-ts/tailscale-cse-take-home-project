@@ -47,8 +47,9 @@ resource "tailscale_acl" "main_acl" {
       {
         action = "check",
         src    = ["autogroup:admin"],
-        dst    = ["tag:database", "tag:eu-router", "tag:app-server"],
+        dst    = ["autogroup:tagged"],
         users  = ["root"],
+        checkPeriod: "always"
       },
     ],
   })

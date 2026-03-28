@@ -23,6 +23,7 @@ func main() {
 	root.AddCommand(mysqlCmd())
 	root.AddCommand(sourceIPCmd())
 	root.AddCommand(transitEncryptCmd())
+	root.AddCommand(testSSHCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
