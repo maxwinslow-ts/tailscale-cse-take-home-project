@@ -1,0 +1,48 @@
+# Insecure comparison demo — local MySQL + Node viewer on an isolated
+# Docker bridge (172.22.0.0/24). No Tailscale, no encryption.
+# Used for side-by-side contrast with the encrypted Tailscale path.
+
+services:
+  insecure-db:
+    image: mysql:8.0
+    container_name: insecure-demo-db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: app
+      MYSQL_USER: app
+      MYSQL_PASSWORD: apppass
+    command: --default-authentication-plugin=mysql_native_password
+    networks:
+      insecure:
+        ipv4_address: 172.22.0.10
+    volumes:
+      - /opt/insecure-demo/seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+    restart: always
+
+  insecure-viewer:
+    image: node:18-alpine
+    container_name: insecure-demo-us-viewer
+    depends_on:
+      - insecure-db
+    ports:
+      - "8888:3000"
+    networks:
+      insecure:
+        ipv4_address: 172.22.0.20
+    volumes:
+      - /opt/insecure-demo/insecure-demo.js:/app/server.js:ro
+    command:
+      - sh
+      - -c
+      - |
+        sleep 10
+        apk add --no-cache mysql-client >/dev/null 2>&1
+        node /app/server.js
+    restart: always
+
+networks:
+  insecure:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/24

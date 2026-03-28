@@ -1,0 +1,79 @@
+---
+# ── EU Database Server (eu-db) ───────────────────────────────────────
+#
+# MySQL bound to the OrbStack bridge IP only (not 0.0.0.0).
+# Tailscale is installed for SSH-based management — no routes advertised.
+# General query log is enabled so the verify suite can confirm that
+# queries arrive with the real container source IP (source IP preservation).
+#
+- name: Configure EU Database Server
+  hosts: eu-db
+  become: true
+  tasks:
+    - name: Install packages
+      apt:
+        name: [mysql-server, curl, tcpdump]
+        state: present
+        update_cache: true
+
+    - name: Install Tailscale
+      shell: curl -fsSL https://tailscale.com/install.sh | sh
+      args:
+        creates: /usr/bin/tailscale
+
+    - name: Join tailnet (SSH management only — no routes)
+      command: >-
+        tailscale up
+        --authkey={{ ts_authkey }}
+        --hostname=eu-db
+        --ssh
+      register: ts_result
+      changed_when: ts_result.rc == 0
+
+    - name: Bind MySQL to bridge IP only
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^bind-address'
+        line: "bind-address = {{ orb_bridge_ip }}"
+      notify: restart mysql
+
+    - name: Ensure MySQL log directory exists
+      file:
+        path: /var/log/mysql
+        state: directory
+        owner: mysql
+        group: adm
+        mode: '0750'
+
+    # General query log records every SQL statement with its source IP,
+    # letting the verify suite prove source IP preservation through the mesh.
+    - name: Enable MySQL general query log
+      copy:
+        dest: /etc/mysql/mysql.conf.d/general-log.cnf
+        content: |
+          [mysqld]
+          general_log = 1
+          general_log_file = /var/log/mysql/general.log
+          log_output = FILE
+      notify: restart mysql
+
+    # Flush now so MySQL is fully restarted before we attempt to seed.
+    - name: Restart MySQL now
+      meta: flush_handlers
+
+    - name: Copy seed SQL to host
+      copy:
+        src: files/seed-europeans.sql
+        dest: /opt/seed-europeans.sql
+        mode: '0644'
+      register: seed_changed
+
+    - name: Seed EU database
+      shell: mysql -u root < /opt/seed-europeans.sql
+      when: seed_changed.changed
+
+  handlers:
+    - name: restart mysql
+      service:
+        name: mysql
+        state: restarted

@@ -23,6 +23,7 @@ out.plan
 
 # Generated files (contain secrets)
 generated/
+ansible/inventory.yml
 
 # Override files
 override.tf
@@ -37,3 +38,9 @@ override.tf.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# Backup files
+*.bak
+
+# Go build output
+cmd/verify/verify

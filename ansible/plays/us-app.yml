@@ -1,0 +1,66 @@
+---
+# ── US Application Server (us-app) ───────────────────────────────────
+#
+# Docker host running three containers on a shared bridge (172.21.0.0/24):
+#   us-app-ts           — Tailscale sidecar (mesh endpoint + subnet router)
+#   us-euro-viewer      — read-only Node.js app (:80)
+#   us-euro-viewer-admin — read/write admin panel (:8080)
+#
+- name: Configure US Application Server
+  hosts: us-app
+  become: true
+  tasks:
+    - name: Install Docker packages
+      apt:
+        name: [docker.io, docker-compose-v2]
+        state: present
+        update_cache: true
+
+    # Disable Docker's userland-proxy so container traffic flows through
+    # iptables directly. This preserves real source IPs instead of
+    # rewriting them to the Docker host address.
+    - name: Configure Docker daemon (disable userland-proxy)
+      copy:
+        dest: /etc/docker/daemon.json
+        content: '{ "userland-proxy": false }'
+      notify: restart docker
+
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Flush handlers (restart docker if config changed)
+      meta: flush_handlers
+
+    - name: Create stack directory
+      file:
+        path: /opt/stack
+        state: directory
+
+    - name: Write docker-compose.yaml
+      template:
+        src: docker-compose.yaml.j2
+        dest: /opt/stack/docker-compose.yaml
+
+    - name: Write server.js (us-euro-viewer)
+      template:
+        src: server.js.j2
+        dest: /opt/stack/server.js
+
+    - name: Write admin.js (us-euro-viewer-admin)
+      template:
+        src: admin.js.j2
+        dest: /opt/stack/admin.js
+
+    - name: Start Docker Compose stack
+      command: docker compose -f /opt/stack/docker-compose.yaml up -d --remove-orphans
+      args:
+        chdir: /opt/stack
+
+  handlers:
+    - name: restart docker
+      service:
+        name: docker
+        state: restarted

@@ -1,0 +1,89 @@
+# Docker Compose stack for the US application server.
+#
+# Three containers share the "mesh" bridge (172.21.0.0/24):
+#   tailscale (.2)  — WireGuard sidecar that advertises this subnet into the tailnet
+#   viewer   (.10)  — read-only EU data viewer (port 80)
+#   admin    (.20)  — read/write admin panel   (port 8080)
+#
+# Each app container adds two static routes so EU-bound traffic exits
+# through the Tailscale sidecar at 172.21.0.2 rather than the default gateway:
+#   - eu-db's bridge IP /32  → Tailscale sidecar
+#   - 100.64.0.0/10 (CGNAT)  → Tailscale sidecar (return path)
+
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: us-app
+    container_name: us-app-ts
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - /var/lib/tailscale:/var/lib/tailscale
+    environment:
+      - TS_AUTHKEY={{ ts_authkey }}
+      - TS_HOSTNAME=us-app
+      - TS_USERSPACE=false
+      - TS_EXTRA_ARGS=--advertise-routes=172.21.0.0/24 --accept-routes --snat-subnet-routes=false --ssh
+    networks:
+      mesh:
+        ipv4_address: 172.21.0.2
+    restart: always
+
+  viewer:
+    image: node:18-alpine
+    container_name: us-euro-viewer
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      - tailscale
+    ports:
+      - "80:3000"
+    networks:
+      mesh:
+        ipv4_address: 172.21.0.10
+    volumes:
+      - /opt/stack/server.js:/app/server.js:ro
+    command:
+      - sh
+      - -c
+      - |
+        sleep 5
+        apk add --no-cache iproute2 mysql-client >/dev/null 2>&1
+        ip route add {{ eu_db_bridge_ip }}/32 via 172.21.0.2 2>/dev/null || true
+        ip route add 100.64.0.0/10 via 172.21.0.2 2>/dev/null || true
+        node /app/server.js
+    restart: always
+
+  admin:
+    image: node:18-alpine
+    container_name: us-euro-viewer-admin
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      - tailscale
+    ports:
+      - "8080:3001"
+    networks:
+      mesh:
+        ipv4_address: 172.21.0.20
+    volumes:
+      - /opt/stack/admin.js:/app/admin.js:ro
+    command:
+      - sh
+      - -c
+      - |
+        sleep 5
+        apk add --no-cache iproute2 mysql-client >/dev/null 2>&1
+        ip route add {{ eu_db_bridge_ip }}/32 via 172.21.0.2 2>/dev/null || true
+        ip route add 100.64.0.0/10 via 172.21.0.2 2>/dev/null || true
+        node /app/admin.js
+    restart: always
+
+networks:
+  mesh:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24

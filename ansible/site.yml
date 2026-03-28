@@ -1,0 +1,17 @@
+---
+# ── Sovereign Mesh — Ansible Orchestrator ────────────────────────────
+#
+# Usage:
+#   1. terraform apply
+#   2. bash ansible/generate-inventory.sh
+#   3. cd ansible && ansible-playbook site.yml
+#
+# Plays run in order: provision EU DB → EU subnet router → US app
+# server → return routes on EU DB → insecure comparison demo.
+# ─────────────────────────────────────────────────────────────────────
+
+- import_playbook: plays/eu-db.yml
+- import_playbook: plays/eu-router.yml
+- import_playbook: plays/us-app.yml
+- import_playbook: plays/eu-db-routes.yml
+- import_playbook: plays/insecure-demo.yml

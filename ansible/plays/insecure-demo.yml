@@ -1,0 +1,45 @@
+---
+# ── Insecure Demo (us-app) ──────────────────────────────────────────
+#
+# A deliberately insecure local-only viewer on the US VM.
+# MySQL + Node app on an isolated Docker bridge (172.22.0.0/24).
+# No Tailscale. Plain HTTP. Used to contrast with the encrypted
+# Tailscale mesh path in a side-by-side demo.
+#
+- name: Deploy Insecure Demo (US-only, no Tailscale)
+  hosts: us-app
+  become: true
+  tasks:
+    - name: Create insecure demo directory
+      file:
+        path: /opt/insecure-demo
+        state: directory
+
+    - name: Write insecure docker-compose.yaml
+      copy:
+        src: ../templates/insecure-compose.yaml
+        dest: /opt/insecure-demo/docker-compose.yaml
+      register: compose_changed
+
+    - name: Write insecure-demo.js
+      copy:
+        src: ../templates/insecure-demo.js
+        dest: /opt/insecure-demo/insecure-demo.js
+
+    - name: Write seed SQL
+      copy:
+        src: ../files/seed-americans.sql
+        dest: /opt/insecure-demo/seed.sql
+      register: seed_changed
+
+    - name: Tear down insecure demo stack (if config changed)
+      command: docker compose -f /opt/insecure-demo/docker-compose.yaml down -v
+      args:
+        chdir: /opt/insecure-demo
+      when: seed_changed.changed or compose_changed.changed
+      ignore_errors: true
+
+    - name: Start insecure demo stack
+      command: docker compose -f /opt/insecure-demo/docker-compose.yaml up -d --remove-orphans
+      args:
+        chdir: /opt/insecure-demo

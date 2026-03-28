@@ -1,0 +1,23 @@
+---
+# ── Return Routes on eu-db ───────────────────────────────────────────
+#
+# Per Tailscale site-to-site docs (Step 5), each subnet device
+# needs routes back through its local subnet router for:
+#   - 100.64.0.0/10 (Tailscale CGNAT range — source IPs from mesh)
+#   - 172.21.0.0/24 (US Docker subnet)
+#
+- name: Configure EU DB return routes
+  hosts: eu-db
+  become: true
+  tasks:
+    - name: Add return route for Tailscale CGNAT via eu-router
+      command: ip route add 100.64.0.0/10 via {{ hostvars['eu-router']['orb_bridge_ip'] }}
+      register: cgnat_route
+      changed_when: cgnat_route.rc == 0
+      failed_when: cgnat_route.rc != 0 and 'File exists' not in cgnat_route.stderr
+
+    - name: Add return route for US Docker subnet via eu-router
+      command: ip route add 172.21.0.0/24 via {{ hostvars['eu-router']['orb_bridge_ip'] }}
+      register: docker_route
+      changed_when: docker_route.rc == 0
+      failed_when: docker_route.rc != 0 and 'File exists' not in docker_route.stderr
